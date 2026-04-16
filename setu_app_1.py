@@ -165,18 +165,53 @@ if st.session_state.page=="landing":
     </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
-    c1,c2=st.columns(2)
+    c1,c2,c3=st.columns(3)
     with c1:
         st.markdown("<div class='auth-card'><div style='font-size:24px;margin-bottom:8px;'>👤</div><div style='font-size:16px;font-weight:700;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>Continue as Guest</div><div style='font-size:12px;color:#9098b1;margin-top:4px;'>Explore everything instantly.</div></div>", unsafe_allow_html=True)
         if st.button("Get Started",use_container_width=True,key="g"):
             st.session_state.utype="guest"; st.session_state.page="setup"; st.rerun()
     with c2:
-        st.markdown("<div class='auth-card'><div style='font-size:24px;margin-bottom:8px;'>✨</div><div style='font-size:16px;font-weight:700;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>Create Free Account</div><div style='font-size:12px;color:#9098b1;margin-top:4px;'>Save your data and get alerts.</div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='auth-card'><div style='font-size:24px;margin-bottom:8px;'>🔑</div><div style='font-size:16px;font-weight:700;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>Sign In</div><div style='font-size:12px;color:#9098b1;margin-top:4px;'>Welcome back! Access your data.</div></div>", unsafe_allow_html=True)
+        if st.button("Sign In",use_container_width=True,key="si"):
+            st.session_state.page="signin"; st.rerun()
+    with c3:
+        st.markdown("<div class='auth-card'><div style='font-size:24px;margin-bottom:8px;'>✨</div><div style='font-size:16px;font-weight:700;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>Create Account</div><div style='font-size:12px;color:#9098b1;margin-top:4px;'>Save your data and get alerts.</div></div>", unsafe_allow_html=True)
         if st.button("Sign Up Free",use_container_width=True,type="primary",key="s"):
             st.session_state.utype="signup"; st.session_state.page="setup"; st.rerun()
 
     st.markdown("---")
     st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v3.1 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
+
+# ═══════════════════════════════════════════════════════════════════════
+# SIGN IN
+# ═══════════════════════════════════════════════════════════════════════
+elif st.session_state.page=="signin":
+    st.markdown("## Welcome back")
+    st.markdown("*Sign in to access your dashboard, job tracker, and tasks.*")
+    st.markdown("####")
+
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        si_email=st.text_input("Email",placeholder="you@university.edu",key="si_email")
+        si_pw=st.text_input("Password",type="password",placeholder="Your password",key="si_pw")
+        st.markdown("####")
+        if st.button("Sign In",type="primary",use_container_width=True,key="si_btn"):
+            if si_email and si_pw:
+                # For now, accept any email/password and go to setup
+                # Real authentication will be added with database later
+                st.session_state.utype="signup"
+                st.session_state.page="setup"
+                st.info("Note: Persistent accounts are coming soon. For now, please set up your profile again.")
+                st.rerun()
+            else:
+                st.error("Please enter your email and password.")
+
+        st.markdown("####")
+        st.markdown("<div style='text-align:center;'><span style='font-size:13px;color:#9098b1;'>Don't have an account?</span></div>", unsafe_allow_html=True)
+        if st.button("Create a free account",use_container_width=True,key="si_signup"):
+            st.session_state.utype="signup"; st.session_state.page="setup"; st.rerun()
+        if st.button("Continue as guest instead",use_container_width=True,key="si_guest"):
+            st.session_state.utype="guest"; st.session_state.page="setup"; st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════
 # SETUP
