@@ -240,12 +240,12 @@ elif st.session_state.page=="app":
         st.markdown(f"<div class='notif notif-warn'>🟡 <strong style='color:#d97706;'>{len(due_today)} task(s) due today.</strong> <span style='color:#5a6178;'>Stay on track!</span></div>", unsafe_allow_html=True)
 
     # Tabs
-    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Pipeline","Job Tracker","Daily Planner","Salaries","Timeline"])
+    tab1,tab2,tab3,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline"])
 
     # ═══ OVERVIEW ═══
     with tab1:
         dl=max((gd-date.today()).days,0); opt_s=gd+timedelta(days=1); unemp=opt_s+timedelta(days=90); du=max((unemp-date.today()).days,0)
-        na=len(st.session_state.apps); ni=len([a for a in st.session_state.apps if a.get("status")=="Interview"])
+        na=len(st.session_state.tracker); ni=len([a for a in st.session_state.tracker if a.get("Status") in ["Phone Screen","Technical Interview","Onsite"]])
         pending_tasks=len([t for t in st.session_state.tasks if t["id"] not in st.session_state.completed_tasks])
 
         c1,c2,c3,c4,c5=st.columns(5)
@@ -315,27 +315,6 @@ elif st.session_state.page=="app":
             tc="tag-green" if "GC" in j["Sponsorship"] else "tag-blue"
             skh=" ".join([f"<span class='skill-tag {'skill-match' if s.lower() in [x.lower() for x in skills] else 'skill-miss'}'>{s}</span>" for s in j["Skills"]])
             st.markdown(f"<div class='card' style='display:flex;align-items:center;gap:18px;padding:16px 20px;'><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};flex-shrink:0;'>{j['Match']}%</div><div style='flex:1;'><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:13px;color:#5a6178;margin:3px 0 8px;'>{j['Company']} · {j['Location']} · <span style='color:#2563eb;'>{j['Salary']}</span></div><div>{skh}</div></div><div style='text-align:right;flex-shrink:0;'><span class='tag {tc}'>{j['Sponsorship']}</span><div style='font-size:11px;color:#9098b1;margin-top:6px;'>{j['Posted']} ago</div></div></div>", unsafe_allow_html=True)
-
-    # ═══ PIPELINE ═══
-    with tab4:
-        st.markdown("##### Application pipeline")
-        with st.expander("Add application",expanded=len(st.session_state.apps)==0):
-            ac1,ac2,ac3=st.columns(3)
-            with ac1: nc=st.text_input("Company",placeholder="e.g. Amazon",key="nc")
-            with ac2: nr=st.text_input("Role",placeholder="e.g. Data Scientist",key="nr")
-            with ac3: ns=st.selectbox("Status",["Applied","Referral","Interview","Offer","Rejected"],key="ns")
-            if st.button("Add",type="primary",key="aa"):
-                if nc and nr: st.session_state.apps.append({"company":nc,"role":nr,"status":ns,"date":date.today().strftime("%b %d")}); st.rerun()
-        if st.session_state.apps:
-            colors={"Applied":"#9098b1","Referral":"#7c3aed","Interview":"#f59e0b","Offer":"#10b981","Rejected":"#ef4444"}
-            prog={"Applied":15,"Referral":35,"Interview":60,"Offer":100,"Rejected":100}
-            tags={"Applied":"tag-gray","Referral":"tag-purple","Interview":"tag-amber","Offer":"tag-green","Rejected":"tag-red"}
-            cards={"Applied":"","Referral":"card-purple","Interview":"card-amber","Offer":"card-green","Rejected":"card-red"}
-            for a in st.session_state.apps:
-                c=colors.get(a["status"],"#9098b1"); pr=prog.get(a["status"],10); tg=tags.get(a["status"],"tag-gray"); cd=cards.get(a["status"],"")
-                st.markdown(f"<div class='card {cd}' style='padding:14px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><div><div style='font-size:14px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{a['role']}</div><div style='font-size:12px;color:#9098b1;'>{a['company']} · {a['date']}</div></div><span class='tag {tg}'>{a['status']}</span></div><div class='pipeline-bar'><div class='pipeline-fill' style='width:{pr}%;background:{c};'></div></div></div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='card' style='text-align:center;padding:40px;'><p style='color:#9098b1;'>Add your first application above.</p></div>", unsafe_allow_html=True)
 
     # ═══ JOB TRACKER (Spreadsheet) ═══
     with tab5:
