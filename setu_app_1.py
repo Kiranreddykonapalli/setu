@@ -18,6 +18,17 @@ def init_connection() -> Client:
 
 supabase = init_connection()
 
+# Health check function
+@st.cache_data
+def test_supabase_connection():
+    """Test if Supabase is reachable."""
+    try:
+        # Try a simple query to health check
+        result = supabase.table("tasks").select("count", count="exact").limit(1).execute()
+        return True, "✓ Connected to Supabase"
+    except Exception as e:
+        return False, f"❌ Supabase error: {str(e)[:150]}"
+
 # ─── Auth Helper Functions ───────────────────────────────────────────────
 def is_valid_email(email):
     """Checks if the string looks like a real email (contains @ and .)"""
@@ -312,6 +323,15 @@ if st.session_state.page=="landing":
 
     st.markdown("---")
     st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.0 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
+    
+    # Debug panel (hidden by default)
+    with st.expander("🔧 Debug: Supabase connection"):
+        is_connected, msg = test_supabase_connection()
+        if is_connected:
+            st.success(msg)
+        else:
+            st.error(msg)
+            st.code(f"SUPABASE_URL: {st.secrets.get('SUPABASE_URL', 'NOT SET')[:50]}...", language="text")
 
 # ═══════════════════════════════════════════════════════════════════════
 # SIGN IN
@@ -389,24 +409,34 @@ elif st.session_state.page=="setup":
                     "name":name, "university":university, "degree":degree, "major":major,
                     "grad":str(grad), "stem":stem, "roles":roles, "skills":skills
                 }
-                try:
-                    # REAL ACCOUNT CREATION
-                    response = sign_up_user(email, pw, profile_data)
-                    if response and response.user:
-                        st.session_state.user = response.user
-                        st.session_state.user_id = response.user.id
-                        st.session_state.profile = profile_data
-                        st.session_state.utype = "user"
-                        st.session_state.page = "app"
-                        st.success("✓ Account created successfully!")
-                        st.rerun()
-                    else:
-                        st.error("Error creating account. Please try again.")
-                except Exception as e:
-                    if "already registered" in str(e).lower():
-                        st.error("This email is already registered. Please sign in instead.")
-                    else:
-                        st.error(f"Error creating account. Please try again.")
+                if len(pw) < 6:
+                    st.error("Password must be at least 6 characters long.")
+                else:
+                    try:
+                        # REAL ACCOUNT CREATION
+                        response = sign_up_user(email, pw, profile_data)
+                        if response and response.user:
+                            st.session_state.user = response.user
+                            st.session_state.user_id = response.user.id
+                            st.session_state.profile = profile_data
+                            st.session_state.utype = "user"
+                            st.session_state.page = "app"
+                            st.success("✓ Account created successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Error creating account. Please try again.")
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        if "already registered" in error_msg or "user already exists" in error_msg:
+                            st.error("📧 This email is already registered. Please sign in instead.")
+                        elif "invalid" in error_msg or "password" in error_msg:
+                            st.error("❌ Password must be at least 6 characters. Try a stronger password.")
+                        elif "network" in error_msg or "connection" in error_msg:
+                            st.error("🔌 Network error. Check your internet connection and try again.")
+                        else:
+                            st.error(f"❌ Error: {str(e)[:100]}")
+                            with st.expander("See full error"):
+                                st.code(str(e))
             else: 
                 st.error("Please fill in name, university, and major.")
         else: # GUEST LOGIC
