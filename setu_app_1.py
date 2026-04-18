@@ -396,4 +396,229 @@ elif st.session_state.page=="app":
     due_today=[t for t in db_tasks if str(t.get("due","")) == today_str and not t.get("completed")]
 
     if overdue:
-        st.markdown(f"<div class='notif'>🔴 <strong style='color:#dc2626;'>You have {len(over
+        st.markdown(f"<div class='notif'>🔴 <strong style='color:#dc2626;'>You have {len(overdue)} overdue task(s)!</strong> Check your Daily Planner.</div>", unsafe_allow_html=True)
+    if due_today:
+        st.markdown(f"<div class='notif notif-warn'>🟡 <strong style='color:#d97706;'>{len(due_today)} task(s) due today.</strong> Stay on track!</div>", unsafe_allow_html=True)
+
+    # Tabs
+    tab1,tab2,tab3,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline"])
+
+    # ═══ OVERVIEW ═══
+    with tab1:
+        dl=max((gd-date.today()).days,0); opt_s=gd+timedelta(days=1); unemp=opt_s+timedelta(days=90); du=max((unemp-date.today()).days,0)
+        na=len(db_jobs); ni=len([a for a in db_jobs if a.get("status") in ["Phone Screen","Technical Interview","Onsite"]])
+        pending_tasks=len([t for t in db_tasks if not t.get("completed")])
+
+        c1,c2,c3,c4,c5=st.columns(5)
+        with c1: st.metric("Graduation",f"{dl}d",gd.strftime("%b %Y"))
+        with c2: st.metric("Employment deadline",f"{du}d",unemp.strftime("%b %Y"))
+        with c3: st.metric("H1B Lottery",f"FY{gd.year+2}",f"Mar {gd.year+1}")
+        with c4: st.metric("Applications",na,f"{ni} interviews")
+        with c5: st.metric("Tasks pending",pending_tasks,f"{len(overdue)} overdue")
+
+        if dl<=45 and dl>0:
+            st.markdown(f"<div class='card card-red'><strong style='color:#ef4444;'>⚠️ {dl} days to graduation</strong> — Have you filed your OPT application?</div>", unsafe_allow_html=True)
+
+        st.markdown("####")
+        left,right=st.columns([1.4,1])
+        with left:
+            st.markdown("##### Top job matches")
+            for _,j in jobs_df.head(4).iterrows():
+                mc="#10b981" if j["Match"]>=70 else "#f59e0b"
+                st.markdown(f"<div class='card' style='display:flex;justify-content:space-between;align-items:center;padding:14px 18px;'><div><div style='font-size:14px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:12px;color:#9098b1;'>{j['Company']} · {j['Salary']}</div></div><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};'>{j['Match']}%</div></div>", unsafe_allow_html=True)
+        with right:
+            st.markdown("##### Today's tasks")
+            todays=[t for t in db_tasks if str(t.get("due",""))==today_str and not t.get("completed")]
+            if todays:
+                for t in todays[:5]:
+                    cat_colors={"Visa":"tag-red","Job Search":"tag-blue","Learning":"tag-purple","Personal":"tag-gray"}
+                    tc=cat_colors.get(t.get("category",""),"tag-gray")
+                    st.markdown(f"<div class='card' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><span class='tag {tc}'>{t.get('category','')}</span></div></div>", unsafe_allow_html=True)
+            else:
+                st.markdown("<div class='card' style='text-align:center;padding:30px;'><p style='color:#9098b1;font-size:13px;'>No tasks for today. Add some in Daily Planner!</p></div>", unsafe_allow_html=True)
+
+    # ═══ H1B SPONSORS ═══
+    with tab2:
+        st.markdown(f"##### H1B Sponsors — {len(h1b_df):,} companies")
+        fc1,fc2,fc3=st.columns([2,1,1])
+        with fc1: search=st.text_input("Search",placeholder="Company name...",key="s1")
+        with fc2: ind=st.selectbox("Industry",["All"]+sorted(h1b_df["Industry"].unique().tolist()))
+        with fc3: sb=st.selectbox("Sort",["Approvals","Salary","Denial Rate"])
+        f=h1b_df.copy()
+        if search: f=f[f["Company"].str.contains(search,case=False,na=False)]
+        if ind!="All": f=f[f["Industry"]==ind]
+        sm={"Approvals":("Approvals",False),"Salary":("Median Salary",False),"Denial Rate":("Denial %",True)}
+        sc,sa=sm[sb]; f=f.sort_values(sc,ascending=sa)
+        disp=f.copy(); disp["Median Salary"]=disp["Median Salary"].apply(lambda x:f"${x:,}" if x>0 else "—"); disp["Approvals"]=disp["Approvals"].apply(lambda x:f"{x:,}")
+        st.dataframe(disp[["Company","Industry","Approvals","Denial %","Median Salary"]],use_container_width=True,hide_index=True,height=450)
+        ch1,ch2=st.columns(2)
+        with ch1:
+            fig=px.bar(f.nlargest(10,"Approvals"),x="Approvals",y="Company",orientation="h",color="Industry",
+                color_discrete_map={"Tech":"#2563eb","Consulting":"#f59e0b","Finance":"#7c3aed","Other":"#9098b1"},title="Top 10 sponsors")
+            fig.update_layout(**PL,yaxis=dict(autorange="reversed"),height=400); st.plotly_chart(fig,use_container_width=True)
+        with ch2:
+            sf=f[f["Median Salary"]>0]
+            if len(sf)>0:
+                fig2=px.scatter(sf,x="Denial %",y="Median Salary",size="Approvals",color="Industry",hover_name="Company",
+                    color_discrete_map={"Tech":"#2563eb","Consulting":"#f59e0b","Finance":"#7c3aed","Other":"#9098b1"},title="Denial vs salary")
+                fig2.update_layout(**PL,height=400); st.plotly_chart(fig2,use_container_width=True)
+
+    # ═══ JOBS ═══
+    with tab3:
+        st.markdown("##### Visa-friendly jobs")
+        sk_p=", ".join(skills[:4])+("..." if len(skills)>4 else "")
+        st.markdown(f"*Matched to: {sk_p}*")
+        js=st.text_input("Search jobs",placeholder="Role, company, or skill...",key="js")
+        fj=jobs_df.copy()
+        if js: fj=fj[fj["Title"].str.contains(js,case=False,na=False)|fj["Company"].str.contains(js,case=False,na=False)]
+        for _,j in fj.iterrows():
+            mc="#10b981" if j["Match"]>=70 else "#f59e0b" if j["Match"]>=40 else "#9098b1"
+            tc="tag-green" if "GC" in j["Sponsorship"] else "tag-blue"
+            skh=" ".join([f"<span class='skill-tag {'skill-match' if s.lower() in [x.lower() for x in skills] else 'skill-miss'}'>{s}</span>" for s in j["Skills"]])
+            st.markdown(f"<div class='card' style='display:flex;align-items:center;gap:18px;padding:16px 20px;'><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};flex-shrink:0;'>{j['Match']}%</div><div style='flex:1;'><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:13px;color:#5a6178;margin:3px 0 8px;'>{j['Company']} · {j['Location']} · <span style='color:#2563eb;'>{j['Salary']}</span></div><div>{skh}</div></div><div style='text-align:right;flex-shrink:0;'><span class='tag {tc}'>{j['Sponsorship']}</span><div style='font-size:11px;color:#9098b1;margin-top:6px;'>{j['Posted']} ago</div></div></div>", unsafe_allow_html=True)
+
+    # ═══ JOB TRACKER ═══
+    with tab5:
+        st.markdown("##### Job application tracker")
+        st.markdown("*Your personal spreadsheet. Track every application.*")
+
+        with st.expander("Add new entry",expanded=len(db_jobs)==0):
+            r1,r2,r3,r4=st.columns(4)
+            with r1: tr_company=st.text_input("Company",placeholder="e.g. Amazon",key="tr_co")
+            with r2: tr_role=st.text_input("Position",placeholder="e.g. Data Scientist",key="tr_ro")
+            with r3: tr_location=st.text_input("Location",placeholder="e.g. Seattle, WA",key="tr_loc")
+            with r4: tr_salary=st.text_input("Salary range",placeholder="e.g. $120K-$150K",key="tr_sal")
+            r5,r6,r7,r8=st.columns(4)
+            with r5: tr_applied=st.date_input("Date applied",value=date.today(),key="tr_ad")
+            with r6: tr_status=st.selectbox("Status",["Applied","Phone Screen","Technical Interview","Onsite","Offer","Rejected","Ghosted","Withdrawn"],key="tr_st")
+            with r7: tr_sponsor=st.selectbox("H1B Sponsor?",["Yes","No","Unknown","Checking"],key="tr_sp")
+            with r8: tr_source=st.selectbox("Source",["LinkedIn","Company Site","Indeed","Handshake","Referral","Career Fair","Other"],key="tr_src")
+            tr_notes=st.text_input("Notes",placeholder="e.g. Referral from John...",key="tr_nt")
+            tr_followup=st.date_input("Follow-up date",value=date.today()+timedelta(days=7),key="tr_fu")
+            if st.button("Add to tracker",type="primary",key="tr_add"):
+                if tr_company and tr_role:
+                    add_db_job({"company":tr_company,"position":tr_role,"location":tr_location,"salary":tr_salary,
+                        "applied_date":str(tr_applied),"status":tr_status,"h1b_sponsor":tr_sponsor,
+                        "source":tr_source,"notes":tr_notes,"follow_up":str(tr_followup)})
+                    st.rerun()
+
+        if db_jobs:
+            tracker_df=pd.DataFrame(db_jobs)
+            display_cols=[c for c in ["company","position","location","salary","applied_date","status","h1b_sponsor","source","notes","follow_up"] if c in tracker_df.columns]
+            if display_cols:
+                total=len(tracker_df)
+                interviewing=len(tracker_df[tracker_df.get("status","").isin(["Phone Screen","Technical Interview","Onsite"])]) if "status" in tracker_df.columns else 0
+                offers=len(tracker_df[tracker_df["status"]=="Offer"]) if "status" in tracker_df.columns else 0
+                rejected=len(tracker_df[tracker_df["status"].isin(["Rejected","Ghosted"])]) if "status" in tracker_df.columns else 0
+                sponsors=len(tracker_df[tracker_df["h1b_sponsor"]=="Yes"]) if "h1b_sponsor" in tracker_df.columns else 0
+
+                s1,s2,s3,s4,s5=st.columns(5)
+                with s1: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;font-family:Space Grotesk,sans-serif;'>{total}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>Total</div></div>", unsafe_allow_html=True)
+                with s2: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;color:#f59e0b;'>{interviewing}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>Interviewing</div></div>", unsafe_allow_html=True)
+                with s3: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;color:#10b981;'>{offers}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>Offers</div></div>", unsafe_allow_html=True)
+                with s4: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;color:#ef4444;'>{rejected}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>Rejected</div></div>", unsafe_allow_html=True)
+                with s5: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;color:#2563eb;'>{sponsors}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>H1B Sponsors</div></div>", unsafe_allow_html=True)
+
+                st.markdown("####")
+                st.dataframe(tracker_df[display_cols],use_container_width=True,hide_index=True,height=400)
+
+                csv=tracker_df[display_cols].to_csv(index=False)
+                st.download_button("Download as CSV",csv,"setu_job_tracker.csv","text/csv",key="dl_csv")
+        else:
+            st.markdown("<div class='card' style='text-align:center;padding:40px;'><div style='font-size:28px;margin-bottom:8px;'>📋</div><p style='color:#9098b1;'>Your job tracker is empty. Add your first application above!</p></div>", unsafe_allow_html=True)
+
+    # ═══ DAILY PLANNER ═══
+    with tab6:
+        st.markdown("##### Daily planner")
+        st.markdown("*Set tasks, track your progress, stay accountable.*")
+
+        with st.expander("Add new task",expanded=False):
+            tc1,tc2,tc3=st.columns([3,1,1])
+            with tc1: task_title=st.text_input("What do you need to do?",placeholder="e.g. Apply to 3 companies...",key="tt")
+            with tc2: task_cat=st.selectbox("Category",["Job Search","Visa","Learning","Personal"],key="tc")
+            with tc3: task_due=st.date_input("Due date",value=date.today(),key="td")
+            task_priority=st.selectbox("Priority",["High","Medium","Low"],key="tp")
+            if st.button("Add task",type="primary",key="at"):
+                if task_title:
+                    add_db_task(task_title, task_cat, str(task_due), task_priority)
+                    st.rerun()
+
+        if db_tasks:
+            overdue_tasks=[t for t in db_tasks if str(t.get("due",""))<today_str and not t.get("completed")]
+            today_tasks=[t for t in db_tasks if str(t.get("due",""))==today_str and not t.get("completed")]
+            upcoming_tasks=[t for t in db_tasks if str(t.get("due",""))>today_str and not t.get("completed")]
+            done_tasks=[t for t in db_tasks if t.get("completed")]
+
+            if overdue_tasks:
+                st.markdown(f"###### 🔴 Overdue ({len(overdue_tasks)})")
+                for t in overdue_tasks:
+                    pri_colors={"High":"tag-red","Medium":"tag-amber","Low":"tag-gray"}
+                    pc=pri_colors.get(t.get("priority",""),"tag-gray")
+                    col1,col2=st.columns([8,1])
+                    with col1:
+                        st.markdown(f"<div class='card task-overdue' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><div><span class='tag {pc}'>{t.get('priority','')}</span> <span class='tag tag-red'>Overdue</span></div></div><div style='font-size:11px;color:#9098b1;margin-top:4px;'>Due: {t.get('due','')}</div></div>", unsafe_allow_html=True)
+                    with col2:
+                        if st.button("✓",key=f"done_{t.get('id','')}"):
+                            complete_task(t["id"]); st.rerun()
+
+            if today_tasks:
+                st.markdown(f"###### 🟡 Today ({len(today_tasks)})")
+                for t in today_tasks:
+                    cat_colors={"Visa":"tag-red","Job Search":"tag-blue","Learning":"tag-purple","Personal":"tag-gray"}
+                    cc=cat_colors.get(t.get("category",""),"tag-gray")
+                    col1,col2=st.columns([8,1])
+                    with col1:
+                        st.markdown(f"<div class='card card-amber' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><span class='tag {cc}'>{t.get('category','')}</span></div></div>", unsafe_allow_html=True)
+                    with col2:
+                        if st.button("✓",key=f"done_{t.get('id','')}"):
+                            complete_task(t["id"]); st.rerun()
+
+            if upcoming_tasks:
+                st.markdown(f"###### 🔵 Upcoming ({len(upcoming_tasks)})")
+                for t in upcoming_tasks:
+                    cat_colors={"Visa":"tag-red","Job Search":"tag-blue","Learning":"tag-purple","Personal":"tag-gray"}
+                    cc=cat_colors.get(t.get("category",""),"tag-gray")
+                    col1,col2=st.columns([8,1])
+                    with col1:
+                        st.markdown(f"<div class='card' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><span class='tag {cc}'>{t.get('category','')}</span></div><div style='font-size:11px;color:#9098b1;margin-top:4px;'>Due: {t.get('due','')}</div></div>", unsafe_allow_html=True)
+                    with col2:
+                        if st.button("✓",key=f"done_{t.get('id','')}"):
+                            complete_task(t["id"]); st.rerun()
+
+            if done_tasks:
+                with st.expander(f"Completed ({len(done_tasks)})"):
+                    for t in done_tasks:
+                        st.markdown(f"<div class='card' style='padding:10px 18px;opacity:0.5;'><span style='font-size:13px;text-decoration:line-through;color:#9098b1;'>✓ {t['title']}</span></div>", unsafe_allow_html=True)
+
+            total=len(db_tasks); done=len(done_tasks)
+            if total>0:
+                pct=int(done/total*100)
+                st.markdown(f"<div style='margin-top:16px;'><div style='font-size:12px;color:#5a6178;margin-bottom:6px;'>Progress: <strong>{pct}%</strong> ({done}/{total})</div><div class='pipeline-bar' style='height:8px;'><div class='pipeline-fill' style='width:{pct}%;background:#10b981;'></div></div></div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='card' style='text-align:center;padding:40px;'><div style='font-size:28px;margin-bottom:8px;'>📅</div><p style='color:#9098b1;'>No tasks yet. Add your first task above!</p></div>", unsafe_allow_html=True)
+
+    # ═══ SALARIES ═══
+    with tab7:
+        st.markdown("##### Salary benchmarks")
+        sm=SALARY.melt(id_vars=["Role"],var_name="Visa Status",value_name="Salary")
+        fig=px.bar(sm,x="Role",y="Salary",color="Visa Status",barmode="group",
+            color_discrete_map={"OPT":"#f59e0b","H1B":"#7c3aed","US Citizen":"#10b981"},title="Annual salary by role and visa status")
+        fig.update_layout(**PL,height=480,yaxis_tickformat="$,.0f",legend=dict(orientation="h",yanchor="bottom",y=1.02,xanchor="center",x=0.5))
+        st.plotly_chart(fig,use_container_width=True)
+        st.markdown("<div class='card card-amber'><span class='tag tag-amber'>Negotiation tip</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>OPT salaries average <strong>22-35% lower</strong> than H1B. Once on H1B, salaries normalize within 1-2 years. Always benchmark against the H1B median.</p></div>", unsafe_allow_html=True)
+
+    # ═══ TIMELINE ═══
+    with tab8:
+        st.markdown("##### Your visa timeline")
+        st.markdown(f"*{uname} · {p.get('degree','')} {p.get('major','')} · Graduating {gd.strftime('%B %d, %Y')}*")
+        for item in get_timeline(gd):
+            if item["status"]=="done": border="border-left:3px solid #d1d5db;"; tc="tag-gray"; tt="DONE"
+            elif item["status"]=="soon":
+                border=f"border-left:3px solid {'#ef4444' if item['days']<=30 else '#f59e0b'};"
+                tc="tag-red" if item["days"]<=30 else "tag-amber"; tt=f"{item['days']}d"
+            else: border="border-left:3px solid #2563eb;"; tc="tag-blue"; tt=f"{item['days']}d"
+            st.markdown(f"<div class='card' style='{border}padding:16px 20px;'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;'><span style='font-size:12px;color:#2563eb;font-family:IBM Plex Mono,monospace;font-weight:600;'>{item['date']}</span><span class='tag {tc}'>{tt}</span></div><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{item['label']}</div><div style='font-size:13px;color:#5a6178;margin-top:4px;'>{item['desc']}</div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card card-red'><span class='tag tag-red'>Critical rule</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>The <strong>90-day unemployment clock</strong> starts on your OPT start date. Exceeding 90 days without employment automatically terminates OPT. Unpaid internships (20+ hrs/week) count.</p></div>", unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.0 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
