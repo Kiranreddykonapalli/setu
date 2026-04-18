@@ -18,24 +18,11 @@ def init_connection() -> Client:
 
 supabase = init_connection()
 
-# Health check function
-@st.cache_data
-def test_supabase_connection():
-    """Test if Supabase is reachable."""
-    try:
-        # Try a simple query to health check
-        result = supabase.table("tasks").select("count", count="exact").limit(1).execute()
-        return True, "✓ Connected to Supabase"
-    except Exception as e:
-        return False, f"❌ Supabase error: {str(e)[:150]}"
-
 # ─── Auth Helper Functions ───────────────────────────────────────────────
 def is_valid_email(email):
-    """Checks if the string looks like a real email (contains @ and .)"""
     return re.match(r"[^@]+@[^@]+\.[^@]+", email) is not None
 
 def sign_up_user(email, password, user_metadata):
-    """Creates a new user and stores their profile info securely."""
     return supabase.auth.sign_up({
         "email": email,
         "password": password,
@@ -43,62 +30,38 @@ def sign_up_user(email, password, user_metadata):
     })
 
 def sign_in_user(email, password):
-    """Logs an existing user in."""
     return supabase.auth.sign_in_with_password({"email": email, "password": password})
 
 def sign_out_user():
-    """Logs the user out."""
     supabase.auth.sign_out()
 
-def get_current_user():
-    """Get the current logged-in user from Supabase session."""
+def reset_password_email(email):
+    """Send password reset email"""
     try:
-        return supabase.auth.get_user()
-    except:
-        return None
-
-def request_password_reset(email):
-    """Send password reset email."""
-    try:
-        response = supabase.auth.reset_password_for_email(
-            email,
-            {"redirectTo": "https://setu-bridge.streamlit.app"}  # Change to your actual URL
-        )
+        supabase.auth.reset_password_for_email(email)
         return True, "✓ Check your email for password reset link"
     except Exception as e:
-        error_msg = str(e).lower()
-        if "user not found" in error_msg:
-            return False, "❌ No account found with this email"
-        elif "network" in error_msg or "connection" in error_msg:
-            return False, "🔌 Network error. Please try again."
-        else:
-            return False, f"Error: {str(e)[:100]}"
+        if "not found" in str(e).lower():
+            return False, "❌ No account with this email"
+        return False, f"Error: {str(e)[:80]}"
 
-def verify_password_reset_token(token):
-    """Verify if reset token is valid."""
-    try:
-        # Token validation happens during password update
-        return True
-    except:
-        return False
-
-# ─── Smart Data Handlers (Guest vs. Auth) ───────────────────────────────────
-# Initialize temporary storage for guests
+# ─── Smart Data Handlers ───────────────────────────────────────────────────
 if "local_tasks" not in st.session_state: st.session_state.local_tasks = []
 if "local_jobs" not in st.session_state: st.session_state.local_jobs = []
 
 def fetch_tasks():
-    """Fetch tasks for current user (guest or authenticated)."""
     if st.session_state.get("utype") == "guest":
         return st.session_state.local_tasks
     else:
         user_id = st.session_state.get("user_id")
         if user_id:
-            return supabase.table("tasks").select("*").eq("user_id", user_id).execute().data
+            try:
+                return supabase.table("tasks").select("*").eq("user_id", user_id).execute().data
+            except:
+                return []
         return []
 
 def add_db_task(title, category, due, priority):
-    """Add a task for current user."""
     task_data = {"title": title, "category": category, "due": due, "priority": priority, "completed": False}
     if st.session_state.get("utype") == "guest":
         task_data["id"] = f"guest_{len(st.session_state.local_tasks)}"
@@ -107,36 +70,44 @@ def add_db_task(title, category, due, priority):
         user_id = st.session_state.get("user_id")
         if user_id:
             task_data["user_id"] = user_id
-            supabase.table("tasks").insert(task_data).execute()
+            try:
+                supabase.table("tasks").insert(task_data).execute()
+            except:
+                pass
 
 def complete_task(task_id):
-    """Mark task as complete."""
     if st.session_state.get("utype") == "guest":
         for t in st.session_state.local_tasks:
             if t["id"] == task_id:
                 t["completed"] = True
     else:
-        supabase.table("tasks").update({"completed": True}).eq("id", task_id).execute()
+        try:
+            supabase.table("tasks").update({"completed": True}).eq("id", task_id).execute()
+        except:
+            pass
 
 def delete_task(task_id):
-    """Delete a task."""
     if st.session_state.get("utype") == "guest":
         st.session_state.local_tasks = [t for t in st.session_state.local_tasks if t["id"] != task_id]
     else:
-        supabase.table("tasks").delete().eq("id", task_id).execute()
+        try:
+            supabase.table("tasks").delete().eq("id", task_id).execute()
+        except:
+            pass
 
 def fetch_jobs():
-    """Fetch job tracker entries for current user."""
     if st.session_state.get("utype") == "guest":
         return st.session_state.local_jobs
     else:
         user_id = st.session_state.get("user_id")
         if user_id:
-            return supabase.table("job_tracker").select("*").eq("user_id", user_id).execute().data
+            try:
+                return supabase.table("job_tracker").select("*").eq("user_id", user_id).execute().data
+            except:
+                return []
         return []
 
 def add_db_job(job_data):
-    """Add a job entry for current user."""
     if st.session_state.get("utype") == "guest":
         job_data["id"] = f"guest_{len(st.session_state.local_jobs)}"
         st.session_state.local_jobs.append(job_data)
@@ -144,34 +115,19 @@ def add_db_job(job_data):
         user_id = st.session_state.get("user_id")
         if user_id:
             job_data["user_id"] = user_id
-            supabase.table("job_tracker").insert(job_data).execute()
-
-def update_db_jobs(df_records):
-    """Update job tracker entries."""
-    if st.session_state.get("utype") == "guest":
-        st.session_state.local_jobs = df_records
-    else:
-        user_id = st.session_state.get("user_id")
-        if user_id:
-            for record in df_records:
-                if "id" in record:
-                    supabase.table("job_tracker").update(record).eq("id", record["id"]).execute()
+            try:
+                supabase.table("job_tracker").insert(job_data).execute()
+            except:
+                pass
 
 def delete_job(job_id):
-    """Delete a job entry."""
     if st.session_state.get("utype") == "guest":
         st.session_state.local_jobs = [j for j in st.session_state.local_jobs if j.get("id") != job_id]
     else:
-        supabase.table("job_tracker").delete().eq("id", job_id).execute()
-
-def update_profile(updated_profile):
-    """Update user profile in metadata."""
-    if st.session_state.get("utype") != "guest":
-        user_id = st.session_state.get("user_id")
-        if user_id:
-            # Update Supabase auth metadata
-            supabase.auth.update_user({"user_metadata": updated_profile})
-            st.session_state.profile = updated_profile
+        try:
+            supabase.table("job_tracker").delete().eq("id", job_id).execute()
+        except:
+            pass
 
 # ─── State ───────────────────────────────────────────────────────────────
 defaults = {"page":"landing","profile":{},"utype":None,"user_id":None}
@@ -347,16 +303,7 @@ if st.session_state.page=="landing":
             st.session_state.utype="signup"; st.session_state.page="setup"; st.rerun()
 
     st.markdown("---")
-    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.0 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
-    
-    # Debug panel (hidden by default)
-    with st.expander("🔧 Debug: Supabase connection"):
-        is_connected, msg = test_supabase_connection()
-        if is_connected:
-            st.success(msg)
-        else:
-            st.error(msg)
-            st.code(f"SUPABASE_URL: {st.secrets.get('SUPABASE_URL', 'NOT SET')[:50]}...", language="text")
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.1 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════
 # SIGN IN
@@ -377,7 +324,6 @@ elif st.session_state.page=="signin":
                     st.error("Please enter a valid email address.")
                 else:
                     try:
-                        # REAL AUTHENTICATION
                         response = sign_in_user(si_email, si_pw)
                         if response and response.user:
                             st.session_state.user = response.user
@@ -394,9 +340,8 @@ elif st.session_state.page=="signin":
             else:
                 st.error("Please enter your email and password.")
 
-        # Forgot password link
-        st.markdown("<div style='text-align:center;margin-top:12px;'><a href='#' style='color:#2563eb;font-size:13px;text-decoration:none;'>Forgot password?</a></div>", unsafe_allow_html=True)
-        if st.button("Reset Password",use_container_width=True,key="si_forgot"):
+        st.markdown("####")
+        if st.button("Forgot Password?",use_container_width=True,key="si_forgot",help="Reset your password"):
             st.session_state.page="forgot_password"; st.rerun()
 
         st.markdown("####")
@@ -423,21 +368,16 @@ elif st.session_state.page=="forgot_password":
                 if not is_valid_email(fp_email):
                     st.error("Please enter a valid email address.")
                 else:
-                    with st.spinner("Sending reset link..."):
-                        success, msg = request_password_reset(fp_email)
-                        if success:
-                            st.success(msg)
-                            st.info("📧 A password reset link has been sent to your email. Click the link to create a new password.")
-                            st.markdown("####")
-                            if st.button("Back to Sign In",use_container_width=True,key="fp_back"):
-                                st.session_state.page="signin"; st.rerun()
-                        else:
-                            st.error(msg)
+                    success, msg = reset_password_email(fp_email)
+                    if success:
+                        st.success(msg)
+                        st.info("📧 Check your email for the reset link. Click it to create a new password.")
+                    else:
+                        st.error(msg)
             else:
                 st.error("Please enter your email address.")
 
         st.markdown("####")
-        st.markdown("<div style='text-align:center;'><span style='font-size:13px;color:#9098b1;'>Remember your password?</span></div>", unsafe_allow_html=True)
         if st.button("Back to Sign In",use_container_width=True,key="fp_signin"):
             st.session_state.page="signin"; st.rerun()
 
@@ -469,42 +409,33 @@ elif st.session_state.page=="setup":
         if st.session_state.utype == "signup":
             if not email or not pw or not is_valid_email(email):
                 st.error("Please enter a valid email address and password.")
+            elif len(pw) < 6:
+                st.error("Password must be at least 6 characters.")
             elif name and university and major:
                 profile_data = {
                     "name":name, "university":university, "degree":degree, "major":major,
                     "grad":str(grad), "stem":stem, "roles":roles, "skills":skills
                 }
-                if len(pw) < 6:
-                    st.error("Password must be at least 6 characters long.")
-                else:
-                    try:
-                        # REAL ACCOUNT CREATION
-                        response = sign_up_user(email, pw, profile_data)
-                        if response and response.user:
-                            st.session_state.user = response.user
-                            st.session_state.user_id = response.user.id
-                            st.session_state.profile = profile_data
-                            st.session_state.utype = "user"
-                            st.session_state.page = "app"
-                            st.success("✓ Account created successfully!")
-                            st.rerun()
-                        else:
-                            st.error("Error creating account. Please try again.")
-                    except Exception as e:
-                        error_msg = str(e).lower()
-                        if "already registered" in error_msg or "user already exists" in error_msg:
-                            st.error("📧 This email is already registered. Please sign in instead.")
-                        elif "invalid" in error_msg or "password" in error_msg:
-                            st.error("❌ Password must be at least 6 characters. Try a stronger password.")
-                        elif "network" in error_msg or "connection" in error_msg:
-                            st.error("🔌 Network error. Check your internet connection and try again.")
-                        else:
-                            st.error(f"❌ Error: {str(e)[:100]}")
-                            with st.expander("See full error"):
-                                st.code(str(e))
+                try:
+                    response = sign_up_user(email, pw, profile_data)
+                    if response and response.user:
+                        st.session_state.user = response.user
+                        st.session_state.user_id = response.user.id
+                        st.session_state.profile = profile_data
+                        st.session_state.utype = "user"
+                        st.session_state.page = "app"
+                        st.success("✓ Account created successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Error creating account. Please try again.")
+                except Exception as e:
+                    if "already registered" in str(e).lower() or "user already exists" in str(e).lower():
+                        st.error("📧 This email is already registered. Please sign in instead.")
+                    else:
+                        st.error(f"Error creating account. Please try again.")
             else: 
                 st.error("Please fill in name, university, and major.")
-        else: # GUEST LOGIC
+        else:
             if name and university and major:
                 st.session_state.profile={"name":name,"university":university,"degree":degree,"major":major,
                     "grad":grad,"stem":stem,"roles":roles,"skills":skills}
@@ -516,13 +447,11 @@ elif st.session_state.page=="setup":
 # MAIN APP
 # ═══════════════════════════════════════════════════════════════════════
 elif st.session_state.page=="app":
-    # --- FETCH DATA ---
     db_tasks = fetch_tasks()
     db_jobs = fetch_jobs()
     
     p=st.session_state.profile
     
-    # Handle the date formatting perfectly for both Guests (who have Python dates) and Auth Users (who have strings from JSON)
     gd_raw = p.get("grad", date(2026,5,15))
     if isinstance(gd_raw, str):
         gd = datetime.strptime(gd_raw, "%Y-%m-%d").date()
@@ -534,7 +463,6 @@ elif st.session_state.page=="app":
     jl=[{**j,"Match":calc_match(j["Skills"],skills)} for j in JOBS]
     jobs_df=pd.DataFrame(jl).sort_values("Match",ascending=False)
 
-    # Top bar with profile icon
     bar1,bar2,bar3=st.columns([7,1,1])
     with bar1:
         acct="tag-gray" if st.session_state.utype=="guest" else "tag-green"
@@ -552,7 +480,6 @@ elif st.session_state.page=="app":
             st.rerun()
     st.markdown("---")
 
-    # Check for overdue tasks
     today_str=date.today().strftime("%Y-%m-%d")
     overdue=[t for t in db_tasks if str(t.get("due","")) < today_str and not t.get("completed")]
     due_today=[t for t in db_tasks if str(t.get("due","")) == today_str and not t.get("completed")]
@@ -562,10 +489,8 @@ elif st.session_state.page=="app":
     if due_today:
         st.markdown(f"<div class='notif notif-warn'>🟡 <strong style='color:#d97706;'>{len(due_today)} task(s) due today.</strong> Stay on track!</div>", unsafe_allow_html=True)
 
-    # Tabs
     tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline","Profile"])
 
-    # ═══ OVERVIEW ═══
     with tab1:
         dl=max((gd-date.today()).days,0); opt_s=gd+timedelta(days=1); unemp=opt_s+timedelta(days=90); du=max((unemp-date.today()).days,0)
         na=len(db_jobs); ni=len([a for a in db_jobs if a.get("status") in ["Phone Screen","Technical Interview","Onsite"]])
@@ -599,7 +524,6 @@ elif st.session_state.page=="app":
             else:
                 st.markdown("<div class='card' style='text-align:center;padding:30px;'><p style='color:#9098b1;font-size:13px;'>No tasks for today. Add some in Daily Planner!</p></div>", unsafe_allow_html=True)
 
-    # ═══ H1B SPONSORS ═══
     with tab2:
         st.markdown(f"##### H1B Sponsors — {len(h1b_df):,} companies")
         fc1,fc2,fc3=st.columns([2,1,1])
@@ -625,7 +549,6 @@ elif st.session_state.page=="app":
                     color_discrete_map={"Tech":"#2563eb","Consulting":"#f59e0b","Finance":"#7c3aed","Other":"#9098b1"},title="Denial vs salary")
                 fig2.update_layout(**PL,height=400); st.plotly_chart(fig2,use_container_width=True)
 
-    # ═══ JOBS ═══
     with tab3:
         st.markdown("##### Visa-friendly jobs")
         sk_p=", ".join(skills[:4])+("..." if len(skills)>4 else "")
@@ -639,7 +562,6 @@ elif st.session_state.page=="app":
             skh=" ".join([f"<span class='skill-tag {'skill-match' if s.lower() in [x.lower() for x in skills] else 'skill-miss'}'>{s}</span>" for s in j["Skills"]])
             st.markdown(f"<div class='card' style='display:flex;align-items:center;gap:18px;padding:16px 20px;'><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};flex-shrink:0;'>{j['Match']}%</div><div style='flex:1;'><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:13px;color:#5a6178;margin:3px 0 8px;'>{j['Company']} · {j['Location']} · <span style='color:#2563eb;'>{j['Salary']}</span></div><div>{skh}</div></div><div style='text-align:right;flex-shrink:0;'><span class='tag {tc}'>{j['Sponsorship']}</span><div style='font-size:11px;color:#9098b1;margin-top:6px;'>{j['Posted']} ago</div></div></div>", unsafe_allow_html=True)
 
-    # ═══ JOB TRACKER ═══
     with tab4:
         st.markdown("##### Job application tracker")
         st.markdown("*Your personal spreadsheet. Track every application.*")
@@ -689,7 +611,6 @@ elif st.session_state.page=="app":
         else:
             st.markdown("<div class='card' style='text-align:center;padding:40px;'><div style='font-size:28px;margin-bottom:8px;'>📋</div><p style='color:#9098b1;'>Your job tracker is empty. Add your first application above!</p></div>", unsafe_allow_html=True)
 
-    # ═══ DAILY PLANNER ═══
     with tab5:
         st.markdown("##### Daily planner")
         st.markdown("*Set tasks, track your progress, stay accountable.*")
@@ -768,7 +689,6 @@ elif st.session_state.page=="app":
         else:
             st.markdown("<div class='card' style='text-align:center;padding:40px;'><div style='font-size:28px;margin-bottom:8px;'>📅</div><p style='color:#9098b1;'>No tasks yet. Add your first task above!</p></div>", unsafe_allow_html=True)
 
-    # ═══ SALARIES ═══
     with tab6:
         st.markdown("##### Salary benchmarks")
         sm=SALARY.melt(id_vars=["Role"],var_name="Visa Status",value_name="Salary")
@@ -778,7 +698,6 @@ elif st.session_state.page=="app":
         st.plotly_chart(fig,use_container_width=True)
         st.markdown("<div class='card card-amber'><span class='tag tag-amber'>Negotiation tip</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>OPT salaries average <strong>22-35% lower</strong> than H1B. Once on H1B, salaries normalize within 1-2 years. Always benchmark against the H1B median.</p></div>", unsafe_allow_html=True)
 
-    # ═══ TIMELINE ═══
     with tab7:
         st.markdown("##### Your visa timeline")
         st.markdown(f"*{uname} · {p.get('degree','')} {p.get('major','')} · Graduating {gd.strftime('%B %d, %Y')}*")
@@ -791,58 +710,31 @@ elif st.session_state.page=="app":
             st.markdown(f"<div class='card' style='{border}padding:16px 20px;'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;'><span style='font-size:12px;color:#2563eb;font-family:IBM Plex Mono,monospace;font-weight:600;'>{item['date']}</span><span class='tag {tc}'>{tt}</span></div><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{item['label']}</div><div style='font-size:13px;color:#5a6178;margin-top:4px;'>{item['desc']}</div></div>", unsafe_allow_html=True)
         st.markdown("<div class='card card-red'><span class='tag tag-red'>Critical rule</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>The <strong>90-day unemployment clock</strong> starts on your OPT start date. Exceeding 90 days without employment automatically terminates OPT. Unpaid internships (20+ hrs/week) count.</p></div>", unsafe_allow_html=True)
 
-    # ═══ PROFILE ═══
     with tab8:
         st.markdown("##### Your profile")
         st.markdown(f"*Manage your account settings and preferences.*")
         
         if st.session_state.utype == "guest":
-            st.info("💾 Create an account to save your profile permanently and sync across devices.")
-        else:
-            st.markdown(f"**Email:** {st.session_state.get('user', {}).email if hasattr(st.session_state.get('user', {}), 'email') else 'Loading...'}")
+            st.info("💾 Create an account to save your profile permanently.")
         
         st.markdown("---")
-        st.markdown("##### Edit your information")
+        st.markdown("##### Your information")
         
-        edit_c1, edit_c2 = st.columns(2)
-        with edit_c1:
-            edit_name = st.text_input("Name", value=p.get("name", ""), placeholder="Your full name")
-            edit_university = st.text_input("University", value=p.get("university", ""), placeholder="e.g. Florida Atlantic University")
-            edit_degree = st.selectbox("Degree", ["M.S.", "M.A.", "MBA", "Ph.D.", "B.S.", "B.A."], index=["M.S.", "M.A.", "MBA", "Ph.D.", "B.S.", "B.A."].index(p.get("degree", "M.S.")))
-            edit_major = st.text_input("Major", value=p.get("major", ""), placeholder="e.g. Data Science & Analytics")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.text(f"**Name:** {p.get('name', 'N/A')}")
+            st.text(f"**University:** {p.get('university', 'N/A')}")
+            st.text(f"**Degree:** {p.get('degree', 'N/A')}")
+            st.text(f"**Major:** {p.get('major', 'N/A')}")
         
-        with edit_c2:
-            edit_grad = st.date_input("Graduation date", value=gd, min_value=date(2024, 1, 1), max_value=date(2030, 12, 31))
-            edit_stem = st.selectbox("STEM degree?", ["Yes", "No", "Not sure"], index=["Yes", "No", "Not sure"].index(p.get("stem", "Yes")))
-            edit_roles = st.multiselect("Target roles", 
-                ["Data Scientist", "Data Analyst", "ML Engineer", "AI Engineer", "Software Engineer", "Data Engineer", "BI Analyst", "Solutions Analyst", "Research Scientist", "Product Analyst"],
-                default=p.get("roles", ["Data Scientist", "Data Analyst"]))
-        
-        st.markdown("##### Your skills")
-        edit_skills = st.multiselect("Select skills for job matching", ALL_SKILLS, default=p.get("skills", ["Python", "SQL"]))
-        
-        if st.button("Save Changes", type="primary", use_container_width=True):
-            updated_profile = {
-                "name": edit_name,
-                "university": edit_university,
-                "degree": edit_degree,
-                "major": edit_major,
-                "grad": str(edit_grad),
-                "stem": edit_stem,
-                "roles": edit_roles,
-                "skills": edit_skills
-            }
-            update_profile(updated_profile)
-            st.success("✓ Profile updated successfully!")
-            st.rerun()
+        with col2:
+            st.text(f"**Graduation:** {gd.strftime('%B %d, %Y')}")
+            st.text(f"**STEM Degree:** {p.get('stem', 'N/A')}")
+            st.text(f"**Target Roles:** {', '.join(p.get('roles', [])[:2])}")
         
         st.markdown("---")
-        if st.session_state.utype != "guest":
-            st.markdown("##### Danger zone")
-            if st.button("Delete Account", help="Permanently delete your account and all data"):
-                st.warning("⚠️ This action cannot be undone. All your data will be permanently deleted.")
-                if st.button("Confirm deletion"):
-                    st.error("Account deletion is not yet implemented. Please contact support.")
+        st.markdown("##### Your Skills")
+        st.text(", ".join(p.get('skills', [])))
 
     st.markdown("---")
-    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.0 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.1 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
