@@ -507,7 +507,7 @@ elif st.session_state.page=="app":
             display_cols=[c for c in ["company","position","location","salary","applied_date","status","h1b_sponsor","source","notes","follow_up"] if c in tracker_df.columns]
             if display_cols:
                 total=len(tracker_df)
-                interviewing=len(tracker_df[tracker_df.get("status","").isin(["Phone Screen","Technical Interview","Onsite"])]) if "status" in tracker_df.columns else 0
+                interviewing=len(tracker_df[tracker_df["status"].isin(["Phone Screen","Technical Interview","Onsite"])]) if "status" in tracker_df.columns else 0
                 offers=len(tracker_df[tracker_df["status"]=="Offer"]) if "status" in tracker_df.columns else 0
                 rejected=len(tracker_df[tracker_df["status"].isin(["Rejected","Ghosted"])]) if "status" in tracker_df.columns else 0
                 sponsors=len(tracker_df[tracker_df["h1b_sponsor"]=="Yes"]) if "h1b_sponsor" in tracker_df.columns else 0
