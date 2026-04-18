@@ -39,26 +39,42 @@ def sign_out_user():
     """Logs the user out."""
     supabase.auth.sign_out()
 
+def get_current_user():
+    """Get the current logged-in user from Supabase session."""
+    try:
+        return supabase.auth.get_user()
+    except:
+        return None
+
 # ─── Smart Data Handlers (Guest vs. Auth) ───────────────────────────────────
 # Initialize temporary storage for guests
 if "local_tasks" not in st.session_state: st.session_state.local_tasks = []
 if "local_jobs" not in st.session_state: st.session_state.local_jobs = []
 
 def fetch_tasks():
+    """Fetch tasks for current user (guest or authenticated)."""
     if st.session_state.get("utype") == "guest":
         return st.session_state.local_tasks
     else:
-        return supabase.table("tasks").select("*").execute().data
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            return supabase.table("tasks").select("*").eq("user_id", user_id).execute().data
+        return []
 
 def add_db_task(title, category, due, priority):
+    """Add a task for current user."""
     task_data = {"title": title, "category": category, "due": due, "priority": priority, "completed": False}
     if st.session_state.get("utype") == "guest":
         task_data["id"] = f"guest_{len(st.session_state.local_tasks)}"
         st.session_state.local_tasks.append(task_data)
     else:
-        supabase.table("tasks").insert(task_data).execute()
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            task_data["user_id"] = user_id
+            supabase.table("tasks").insert(task_data).execute()
 
 def complete_task(task_id):
+    """Mark task as complete."""
     if st.session_state.get("utype") == "guest":
         for t in st.session_state.local_tasks:
             if t["id"] == task_id:
@@ -66,28 +82,63 @@ def complete_task(task_id):
     else:
         supabase.table("tasks").update({"completed": True}).eq("id", task_id).execute()
 
+def delete_task(task_id):
+    """Delete a task."""
+    if st.session_state.get("utype") == "guest":
+        st.session_state.local_tasks = [t for t in st.session_state.local_tasks if t["id"] != task_id]
+    else:
+        supabase.table("tasks").delete().eq("id", task_id).execute()
+
 def fetch_jobs():
+    """Fetch job tracker entries for current user."""
     if st.session_state.get("utype") == "guest":
         return st.session_state.local_jobs
     else:
-        return supabase.table("job_tracker").select("*").execute().data
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            return supabase.table("job_tracker").select("*").eq("user_id", user_id).execute().data
+        return []
 
 def add_db_job(job_data):
+    """Add a job entry for current user."""
     if st.session_state.get("utype") == "guest":
         job_data["id"] = f"guest_{len(st.session_state.local_jobs)}"
         st.session_state.local_jobs.append(job_data)
     else:
-        supabase.table("job_tracker").insert(job_data).execute()
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            job_data["user_id"] = user_id
+            supabase.table("job_tracker").insert(job_data).execute()
 
 def update_db_jobs(df_records):
+    """Update job tracker entries."""
     if st.session_state.get("utype") == "guest":
         st.session_state.local_jobs = df_records
     else:
-        supabase.table("job_tracker").upsert(df_records).execute()
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            for record in df_records:
+                if "id" in record:
+                    supabase.table("job_tracker").update(record).eq("id", record["id"]).execute()
 
+def delete_job(job_id):
+    """Delete a job entry."""
+    if st.session_state.get("utype") == "guest":
+        st.session_state.local_jobs = [j for j in st.session_state.local_jobs if j.get("id") != job_id]
+    else:
+        supabase.table("job_tracker").delete().eq("id", job_id).execute()
+
+def update_profile(updated_profile):
+    """Update user profile in metadata."""
+    if st.session_state.get("utype") != "guest":
+        user_id = st.session_state.get("user_id")
+        if user_id:
+            # Update Supabase auth metadata
+            supabase.auth.update_user({"user_metadata": updated_profile})
+            st.session_state.profile = updated_profile
 
 # ─── State ───────────────────────────────────────────────────────────────
-defaults = {"page":"landing","profile":{},"utype":None}
+defaults = {"page":"landing","profile":{},"utype":None,"user_id":None}
 for k, v in defaults.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -130,6 +181,7 @@ div[data-testid="stMetric"] [data-testid="stMetricValue"] { color:var(--text) !i
 .stDataFrame { border-radius:12px; overflow:hidden; border:1px solid var(--border); }
 .notif { background:#fef2f2; border:1px solid #fecaca; border-radius:10px; padding:14px 18px; margin-bottom:10px; }
 .notif-warn { background:#fffbeb; border-color:#fde68a; }
+.profile-icon { display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:50%; background:var(--accent); color:white; font-weight:700; font-size:16px; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -259,7 +311,7 @@ if st.session_state.page=="landing":
             st.session_state.utype="signup"; st.session_state.page="setup"; st.rerun()
 
     st.markdown("---")
-    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v3.1 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.0 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════
 # SIGN IN
@@ -282,11 +334,16 @@ elif st.session_state.page=="signin":
                     try:
                         # REAL AUTHENTICATION
                         response = sign_in_user(si_email, si_pw)
-                        st.session_state.user = response.user
-                        st.session_state.profile = response.user.user_metadata
-                        st.session_state.utype = "user"
-                        st.session_state.page = "app"
-                        st.rerun()
+                        if response and response.user:
+                            st.session_state.user = response.user
+                            st.session_state.user_id = response.user.id
+                            st.session_state.profile = response.user.user_metadata if response.user.user_metadata else {}
+                            st.session_state.utype = "user"
+                            st.session_state.page = "app"
+                            st.success("✓ Signed in successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Invalid email or password. Please try again.")
                     except Exception as e:
                         st.error("Invalid email or password. Please try again.")
             else:
@@ -330,25 +387,32 @@ elif st.session_state.page=="setup":
             elif name and university and major:
                 profile_data = {
                     "name":name, "university":university, "degree":degree, "major":major,
-                    "grad":str(grad), "stem":stem, "roles":roles, "skills":skills, "utype":"signup"
+                    "grad":str(grad), "stem":stem, "roles":roles, "skills":skills
                 }
                 try:
                     # REAL ACCOUNT CREATION
                     response = sign_up_user(email, pw, profile_data)
-                    st.session_state.user = response.user
-                    st.session_state.profile = profile_data
-                    st.session_state.utype = "user"
-                    st.session_state.page = "app"
-                    st.success("Account created successfully!")
-                    st.rerun()
+                    if response and response.user:
+                        st.session_state.user = response.user
+                        st.session_state.user_id = response.user.id
+                        st.session_state.profile = profile_data
+                        st.session_state.utype = "user"
+                        st.session_state.page = "app"
+                        st.success("✓ Account created successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Error creating account. Please try again.")
                 except Exception as e:
-                    st.error(f"Error creating account: {e}")
+                    if "already registered" in str(e).lower():
+                        st.error("This email is already registered. Please sign in instead.")
+                    else:
+                        st.error(f"Error creating account. Please try again.")
             else: 
                 st.error("Please fill in name, university, and major.")
         else: # GUEST LOGIC
             if name and university and major:
                 st.session_state.profile={"name":name,"university":university,"degree":degree,"major":major,
-                    "grad":grad,"stem":stem,"roles":roles,"skills":skills,"utype":"guest"}
+                    "grad":grad,"stem":stem,"roles":roles,"skills":skills}
                 st.session_state.page="app"; st.rerun()
             else: 
                 st.error("Please fill in name, university, and major.")
@@ -371,19 +435,22 @@ elif st.session_state.page=="app":
         gd = gd_raw
         
     skills=p.get("skills",[]); uname=p.get("name","Student")
+    user_initial = uname[0].upper() if uname else "S"
     jl=[{**j,"Match":calc_match(j["Skills"],skills)} for j in JOBS]
     jobs_df=pd.DataFrame(jl).sort_values("Match",ascending=False)
 
-    # Top bar
-    bar1,bar2=st.columns([8,1])
+    # Top bar with profile icon
+    bar1,bar2,bar3=st.columns([7,1,1])
     with bar1:
         acct="tag-gray" if st.session_state.utype=="guest" else "tag-green"
         lbl="GUEST" if st.session_state.utype=="guest" else "ACCOUNT"
         st.markdown(f"<div style='display:flex;align-items:center;gap:12px;'><span style='font-size:13px;color:#5a6178;'>Welcome, <strong style='color:#1a1d26;'>{uname}</strong></span><span class='tag {acct}'>{lbl}</span></div>", unsafe_allow_html=True)
     with bar2:
+        st.markdown(f"<div class='profile-icon'>{user_initial}</div>", unsafe_allow_html=True)
+    with bar3:
         if st.button("Logout",key="lo"):
             if st.session_state.utype != "guest":
-                sign_out_user() # Tell Supabase to end the session
+                sign_out_user()
             for k in defaults: st.session_state[k]=defaults[k]
             st.session_state.local_tasks = []
             st.session_state.local_jobs = []
@@ -401,7 +468,7 @@ elif st.session_state.page=="app":
         st.markdown(f"<div class='notif notif-warn'>🟡 <strong style='color:#d97706;'>{len(due_today)} task(s) due today.</strong> Stay on track!</div>", unsafe_allow_html=True)
 
     # Tabs
-    tab1,tab2,tab3,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline"])
+    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline","Profile"])
 
     # ═══ OVERVIEW ═══
     with tab1:
@@ -478,7 +545,7 @@ elif st.session_state.page=="app":
             st.markdown(f"<div class='card' style='display:flex;align-items:center;gap:18px;padding:16px 20px;'><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};flex-shrink:0;'>{j['Match']}%</div><div style='flex:1;'><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:13px;color:#5a6178;margin:3px 0 8px;'>{j['Company']} · {j['Location']} · <span style='color:#2563eb;'>{j['Salary']}</span></div><div>{skh}</div></div><div style='text-align:right;flex-shrink:0;'><span class='tag {tc}'>{j['Sponsorship']}</span><div style='font-size:11px;color:#9098b1;margin-top:6px;'>{j['Posted']} ago</div></div></div>", unsafe_allow_html=True)
 
     # ═══ JOB TRACKER ═══
-    with tab5:
+    with tab4:
         st.markdown("##### Job application tracker")
         st.markdown("*Your personal spreadsheet. Track every application.*")
 
@@ -528,7 +595,7 @@ elif st.session_state.page=="app":
             st.markdown("<div class='card' style='text-align:center;padding:40px;'><div style='font-size:28px;margin-bottom:8px;'>📋</div><p style='color:#9098b1;'>Your job tracker is empty. Add your first application above!</p></div>", unsafe_allow_html=True)
 
     # ═══ DAILY PLANNER ═══
-    with tab6:
+    with tab5:
         st.markdown("##### Daily planner")
         st.markdown("*Set tasks, track your progress, stay accountable.*")
 
@@ -554,36 +621,45 @@ elif st.session_state.page=="app":
                 for t in overdue_tasks:
                     pri_colors={"High":"tag-red","Medium":"tag-amber","Low":"tag-gray"}
                     pc=pri_colors.get(t.get("priority",""),"tag-gray")
-                    col1,col2=st.columns([8,1])
+                    col1,col2,col3=st.columns([7,1,1])
                     with col1:
                         st.markdown(f"<div class='card task-overdue' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><div><span class='tag {pc}'>{t.get('priority','')}</span> <span class='tag tag-red'>Overdue</span></div></div><div style='font-size:11px;color:#9098b1;margin-top:4px;'>Due: {t.get('due','')}</div></div>", unsafe_allow_html=True)
                     with col2:
-                        if st.button("✓",key=f"done_{t.get('id','')}"):
+                        if st.button("✓",key=f"done_{t.get('id','')}",help="Mark complete"):
                             complete_task(t["id"]); st.rerun()
+                    with col3:
+                        if st.button("🗑️",key=f"del_{t.get('id','')}",help="Delete"):
+                            delete_task(t["id"]); st.rerun()
 
             if today_tasks:
                 st.markdown(f"###### 🟡 Today ({len(today_tasks)})")
                 for t in today_tasks:
                     cat_colors={"Visa":"tag-red","Job Search":"tag-blue","Learning":"tag-purple","Personal":"tag-gray"}
                     cc=cat_colors.get(t.get("category",""),"tag-gray")
-                    col1,col2=st.columns([8,1])
+                    col1,col2,col3=st.columns([7,1,1])
                     with col1:
                         st.markdown(f"<div class='card card-amber' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><span class='tag {cc}'>{t.get('category','')}</span></div></div>", unsafe_allow_html=True)
                     with col2:
-                        if st.button("✓",key=f"done_{t.get('id','')}"):
+                        if st.button("✓",key=f"done_t_{t.get('id','')}",help="Mark complete"):
                             complete_task(t["id"]); st.rerun()
+                    with col3:
+                        if st.button("🗑️",key=f"del_t_{t.get('id','')}",help="Delete"):
+                            delete_task(t["id"]); st.rerun()
 
             if upcoming_tasks:
                 st.markdown(f"###### 🔵 Upcoming ({len(upcoming_tasks)})")
                 for t in upcoming_tasks:
                     cat_colors={"Visa":"tag-red","Job Search":"tag-blue","Learning":"tag-purple","Personal":"tag-gray"}
                     cc=cat_colors.get(t.get("category",""),"tag-gray")
-                    col1,col2=st.columns([8,1])
+                    col1,col2,col3=st.columns([7,1,1])
                     with col1:
                         st.markdown(f"<div class='card' style='padding:12px 18px;'><div style='display:flex;justify-content:space-between;align-items:center;'><span style='font-size:13px;color:#1a1d26;'>{t['title']}</span><span class='tag {cc}'>{t.get('category','')}</span></div><div style='font-size:11px;color:#9098b1;margin-top:4px;'>Due: {t.get('due','')}</div></div>", unsafe_allow_html=True)
                     with col2:
-                        if st.button("✓",key=f"done_{t.get('id','')}"):
+                        if st.button("✓",key=f"done_u_{t.get('id','')}",help="Mark complete"):
                             complete_task(t["id"]); st.rerun()
+                    with col3:
+                        if st.button("🗑️",key=f"del_u_{t.get('id','')}",help="Delete"):
+                            delete_task(t["id"]); st.rerun()
 
             if done_tasks:
                 with st.expander(f"Completed ({len(done_tasks)})"):
@@ -598,7 +674,7 @@ elif st.session_state.page=="app":
             st.markdown("<div class='card' style='text-align:center;padding:40px;'><div style='font-size:28px;margin-bottom:8px;'>📅</div><p style='color:#9098b1;'>No tasks yet. Add your first task above!</p></div>", unsafe_allow_html=True)
 
     # ═══ SALARIES ═══
-    with tab7:
+    with tab6:
         st.markdown("##### Salary benchmarks")
         sm=SALARY.melt(id_vars=["Role"],var_name="Visa Status",value_name="Salary")
         fig=px.bar(sm,x="Role",y="Salary",color="Visa Status",barmode="group",
@@ -608,7 +684,7 @@ elif st.session_state.page=="app":
         st.markdown("<div class='card card-amber'><span class='tag tag-amber'>Negotiation tip</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>OPT salaries average <strong>22-35% lower</strong> than H1B. Once on H1B, salaries normalize within 1-2 years. Always benchmark against the H1B median.</p></div>", unsafe_allow_html=True)
 
     # ═══ TIMELINE ═══
-    with tab8:
+    with tab7:
         st.markdown("##### Your visa timeline")
         st.markdown(f"*{uname} · {p.get('degree','')} {p.get('major','')} · Graduating {gd.strftime('%B %d, %Y')}*")
         for item in get_timeline(gd):
@@ -619,6 +695,59 @@ elif st.session_state.page=="app":
             else: border="border-left:3px solid #2563eb;"; tc="tag-blue"; tt=f"{item['days']}d"
             st.markdown(f"<div class='card' style='{border}padding:16px 20px;'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;'><span style='font-size:12px;color:#2563eb;font-family:IBM Plex Mono,monospace;font-weight:600;'>{item['date']}</span><span class='tag {tc}'>{tt}</span></div><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{item['label']}</div><div style='font-size:13px;color:#5a6178;margin-top:4px;'>{item['desc']}</div></div>", unsafe_allow_html=True)
         st.markdown("<div class='card card-red'><span class='tag tag-red'>Critical rule</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>The <strong>90-day unemployment clock</strong> starts on your OPT start date. Exceeding 90 days without employment automatically terminates OPT. Unpaid internships (20+ hrs/week) count.</p></div>", unsafe_allow_html=True)
+
+    # ═══ PROFILE ═══
+    with tab8:
+        st.markdown("##### Your profile")
+        st.markdown(f"*Manage your account settings and preferences.*")
+        
+        if st.session_state.utype == "guest":
+            st.info("💾 Create an account to save your profile permanently and sync across devices.")
+        else:
+            st.markdown(f"**Email:** {st.session_state.get('user', {}).email if hasattr(st.session_state.get('user', {}), 'email') else 'Loading...'}")
+        
+        st.markdown("---")
+        st.markdown("##### Edit your information")
+        
+        edit_c1, edit_c2 = st.columns(2)
+        with edit_c1:
+            edit_name = st.text_input("Name", value=p.get("name", ""), placeholder="Your full name")
+            edit_university = st.text_input("University", value=p.get("university", ""), placeholder="e.g. Florida Atlantic University")
+            edit_degree = st.selectbox("Degree", ["M.S.", "M.A.", "MBA", "Ph.D.", "B.S.", "B.A."], index=["M.S.", "M.A.", "MBA", "Ph.D.", "B.S.", "B.A."].index(p.get("degree", "M.S.")))
+            edit_major = st.text_input("Major", value=p.get("major", ""), placeholder="e.g. Data Science & Analytics")
+        
+        with edit_c2:
+            edit_grad = st.date_input("Graduation date", value=gd, min_value=date(2024, 1, 1), max_value=date(2030, 12, 31))
+            edit_stem = st.selectbox("STEM degree?", ["Yes", "No", "Not sure"], index=["Yes", "No", "Not sure"].index(p.get("stem", "Yes")))
+            edit_roles = st.multiselect("Target roles", 
+                ["Data Scientist", "Data Analyst", "ML Engineer", "AI Engineer", "Software Engineer", "Data Engineer", "BI Analyst", "Solutions Analyst", "Research Scientist", "Product Analyst"],
+                default=p.get("roles", ["Data Scientist", "Data Analyst"]))
+        
+        st.markdown("##### Your skills")
+        edit_skills = st.multiselect("Select skills for job matching", ALL_SKILLS, default=p.get("skills", ["Python", "SQL"]))
+        
+        if st.button("Save Changes", type="primary", use_container_width=True):
+            updated_profile = {
+                "name": edit_name,
+                "university": edit_university,
+                "degree": edit_degree,
+                "major": edit_major,
+                "grad": str(edit_grad),
+                "stem": edit_stem,
+                "roles": edit_roles,
+                "skills": edit_skills
+            }
+            update_profile(updated_profile)
+            st.success("✓ Profile updated successfully!")
+            st.rerun()
+        
+        st.markdown("---")
+        if st.session_state.utype != "guest":
+            st.markdown("##### Danger zone")
+            if st.button("Delete Account", help="Permanently delete your account and all data"):
+                st.warning("⚠️ This action cannot be undone. All your data will be permanently deleted.")
+                if st.button("Confirm deletion"):
+                    st.error("Account deletion is not yet implemented. Please contact support.")
 
     st.markdown("---")
     st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.0 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
