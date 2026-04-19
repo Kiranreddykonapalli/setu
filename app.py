@@ -12,8 +12,9 @@ st.set_page_config(page_title="Setu — The Bridge", page_icon="🌉", layout="w
 # ─── Supabase Connection ─────────────────────────────────────────────────
 @st.cache_resource
 def init_connection() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+    # .strip() automatically removes any invisible spaces or newlines from your secrets
+    url = st.secrets["SUPABASE_URL"].strip().strip('"').strip("'")
+    key = st.secrets["SUPABASE_KEY"].strip().strip('"').strip("'")
     return create_client(url, key)
 
 supabase = init_connection()
@@ -38,7 +39,11 @@ def sign_out_user():
 def reset_password_email(email):
     """Send password reset email"""
     try:
-        supabase.auth.reset_password_for_email(email)
+        # Added a redirect so the email link brings them back to your app
+        supabase.auth.reset_password_for_email(
+            email,
+            options={"redirect_to": "https://setu-bridge.streamlit.app"}
+        )
         return True, "✓ Check your email for password reset link"
     except Exception as e:
         if "not found" in str(e).lower():
