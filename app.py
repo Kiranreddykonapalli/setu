@@ -12,7 +12,6 @@ st.set_page_config(page_title="Setu — The Bridge", page_icon="🌉", layout="w
 # ─── Supabase Connection ─────────────────────────────────────────────────
 @st.cache_resource
 def init_connection() -> Client:
-    # .strip() automatically removes any invisible spaces or newlines from your secrets
     url = st.secrets["SUPABASE_URL"].strip().strip('"').strip("'")
     key = st.secrets["SUPABASE_KEY"].strip().strip('"').strip("'")
     return create_client(url, key)
@@ -37,9 +36,7 @@ def sign_out_user():
     supabase.auth.sign_out()
 
 def reset_password_email(email):
-    """Send password reset email"""
     try:
-        # Added a redirect so the email link brings them back to your app
         supabase.auth.reset_password_for_email(
             email,
             options={"redirect_to": "https://setu-bridge.streamlit.app"}
@@ -62,7 +59,8 @@ def fetch_tasks():
         if user_id:
             try:
                 return supabase.table("tasks").select("*").eq("user_id", user_id).execute().data
-            except:
+            except Exception as e:
+                st.error(f"Error fetching tasks: {e}")
                 return []
         return []
 
@@ -77,8 +75,8 @@ def add_db_task(title, category, due, priority):
             task_data["user_id"] = user_id
             try:
                 supabase.table("tasks").insert(task_data).execute()
-            except:
-                pass
+            except Exception as e:
+                st.error(f"Database Error (Add Task): {e}")
 
 def complete_task(task_id):
     if st.session_state.get("utype") == "guest":
@@ -88,8 +86,8 @@ def complete_task(task_id):
     else:
         try:
             supabase.table("tasks").update({"completed": True}).eq("id", task_id).execute()
-        except:
-            pass
+        except Exception as e:
+            st.error(f"Database Error (Complete Task): {e}")
 
 def delete_task(task_id):
     if st.session_state.get("utype") == "guest":
@@ -97,8 +95,8 @@ def delete_task(task_id):
     else:
         try:
             supabase.table("tasks").delete().eq("id", task_id).execute()
-        except:
-            pass
+        except Exception as e:
+            st.error(f"Database Error (Delete Task): {e}")
 
 def fetch_jobs():
     if st.session_state.get("utype") == "guest":
@@ -108,7 +106,8 @@ def fetch_jobs():
         if user_id:
             try:
                 return supabase.table("job_tracker").select("*").eq("user_id", user_id).execute().data
-            except:
+            except Exception as e:
+                st.error(f"Error fetching jobs: {e}")
                 return []
         return []
 
@@ -122,8 +121,8 @@ def add_db_job(job_data):
             job_data["user_id"] = user_id
             try:
                 supabase.table("job_tracker").insert(job_data).execute()
-            except:
-                pass
+            except Exception as e:
+                st.error(f"Database Error (Add Job): {e}")
 
 def delete_job(job_id):
     if st.session_state.get("utype") == "guest":
@@ -131,8 +130,17 @@ def delete_job(job_id):
     else:
         try:
             supabase.table("job_tracker").delete().eq("id", job_id).execute()
-        except:
-            pass
+        except Exception as e:
+            st.error(f"Database Error (Delete Job): {e}")
+
+def update_db_jobs(df_records):
+    if st.session_state.get("utype") == "guest":
+        st.session_state.local_jobs = df_records
+    else:
+        try:
+            supabase.table("job_tracker").upsert(df_records).execute()
+        except Exception as e:
+            st.error(f"Database Error (Update Jobs): {e}")
 
 # ─── State ───────────────────────────────────────────────────────────────
 defaults = {"page":"landing","profile":{},"utype":None,"user_id":None}
@@ -339,9 +347,10 @@ elif st.session_state.page=="signin":
                             st.success("✓ Signed in successfully!")
                             st.rerun()
                         else:
-                            st.error("Invalid email or password. Please try again.")
+                            st.error("Invalid email or password.")
                     except Exception as e:
-                        st.error("Invalid email or password. Please try again.")
+                        # THIS WILL REVEAL EXACTLY WHY YOU CAN'T LOG IN
+                        st.error(f"Login failed: {e}") 
             else:
                 st.error("Please enter your email and password.")
 
@@ -437,7 +446,7 @@ elif st.session_state.page=="setup":
                     if "already registered" in str(e).lower() or "user already exists" in str(e).lower():
                         st.error("📧 This email is already registered. Please sign in instead.")
                     else:
-                        st.error(f"Error creating account. Please try again.")
+                        st.error(f"Sign Up Error: {e}")
             else: 
                 st.error("Please fill in name, university, and major.")
         else:
@@ -478,7 +487,8 @@ elif st.session_state.page=="app":
     with bar3:
         if st.button("Logout",key="lo"):
             if st.session_state.utype != "guest":
-                sign_out_user()
+                try: sign_out_user()
+                except: pass
             for k in defaults: st.session_state[k]=defaults[k]
             st.session_state.local_tasks = []
             st.session_state.local_jobs = []
@@ -498,7 +508,7 @@ elif st.session_state.page=="app":
 
     with tab1:
         dl=max((gd-date.today()).days,0); opt_s=gd+timedelta(days=1); unemp=opt_s+timedelta(days=90); du=max((unemp-date.today()).days,0)
-        na=len(db_jobs); ni=len([a for a in db_jobs if a.get("status") in ["Phone Screen","Technical Interview","Onsite"]])
+        na=len(db_jobs); ni=len([a for a in db_jobs if a.get("Status") in ["Phone Screen","Technical Interview","Onsite"]])
         pending_tasks=len([t for t in db_tasks if not t.get("completed")])
 
         c1,c2,c3,c4,c5=st.columns(5)
@@ -586,20 +596,20 @@ elif st.session_state.page=="app":
             tr_followup=st.date_input("Follow-up date",value=date.today()+timedelta(days=7),key="tr_fu")
             if st.button("Add to tracker",type="primary",key="tr_add"):
                 if tr_company and tr_role:
-                    add_db_job({"company":tr_company,"position":tr_role,"location":tr_location,"salary":tr_salary,
-                        "applied_date":str(tr_applied),"status":tr_status,"h1b_sponsor":tr_sponsor,
-                        "source":tr_source,"notes":tr_notes,"follow_up":str(tr_followup)})
+                    add_db_job({"Company":tr_company,"Position":tr_role,"Location":tr_location,"Salary":tr_salary,
+                        "Applied":str(tr_applied),"Status":tr_status,"H1B Sponsor":tr_sponsor,
+                        "Source":tr_source,"Notes":tr_notes,"Follow-up":str(tr_followup)})
                     st.rerun()
 
         if db_jobs:
             tracker_df=pd.DataFrame(db_jobs)
-            display_cols=[c for c in ["company","position","location","salary","applied_date","status","h1b_sponsor","source","notes","follow_up"] if c in tracker_df.columns]
+            display_cols=[c for c in ["Company","Position","Location","Salary","Applied","Status","H1B Sponsor","Source","Notes","Follow-up"] if c in tracker_df.columns]
             if display_cols:
                 total=len(tracker_df)
-                interviewing=len(tracker_df[tracker_df["status"].isin(["Phone Screen","Technical Interview","Onsite"])]) if "status" in tracker_df.columns else 0
-                offers=len(tracker_df[tracker_df["status"]=="Offer"]) if "status" in tracker_df.columns else 0
-                rejected=len(tracker_df[tracker_df["status"].isin(["Rejected","Ghosted"])]) if "status" in tracker_df.columns else 0
-                sponsors=len(tracker_df[tracker_df["h1b_sponsor"]=="Yes"]) if "h1b_sponsor" in tracker_df.columns else 0
+                interviewing=len(tracker_df[tracker_df["Status"].isin(["Phone Screen","Technical Interview","Onsite"])]) if "Status" in tracker_df.columns else 0
+                offers=len(tracker_df[tracker_df["Status"]=="Offer"]) if "Status" in tracker_df.columns else 0
+                rejected=len(tracker_df[tracker_df["Status"].isin(["Rejected","Ghosted"])]) if "Status" in tracker_df.columns else 0
+                sponsors=len(tracker_df[tracker_df["H1B Sponsor"]=="Yes"]) if "H1B Sponsor" in tracker_df.columns else 0
 
                 s1,s2,s3,s4,s5=st.columns(5)
                 with s1: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;font-family:Space Grotesk,sans-serif;'>{total}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>Total</div></div>", unsafe_allow_html=True)
@@ -609,7 +619,19 @@ elif st.session_state.page=="app":
                 with s5: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;color:#2563eb;'>{sponsors}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>H1B Sponsors</div></div>", unsafe_allow_html=True)
 
                 st.markdown("####")
-                st.dataframe(tracker_df[display_cols],use_container_width=True,hide_index=True,height=400)
+                
+                edited_df=st.data_editor(
+                    tracker_df[display_cols],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key="tracker_editor"
+                )
+
+                if st.button("Save changes to Database",type="primary",key="save_tracker"):
+                    updated_records = edited_df.to_dict("records")
+                    update_db_jobs(updated_records)
+                    st.success("Tracker securely saved!")
 
                 csv=tracker_df[display_cols].to_csv(index=False)
                 st.download_button("Download as CSV",csv,"setu_job_tracker.csv","text/csv",key="dl_csv")
