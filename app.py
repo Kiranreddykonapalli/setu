@@ -273,22 +273,75 @@ def get_timeline(gd):
         result.append({"date":d.strftime("%b %d, %Y"),"label":f"{icon} {label}","desc":desc,"status":status,"days":days})
     return result
 
-# ─── Live Job Fetcher ─────────────────────────────────────────────────────
+# ─── Live Job Fetcher (USA Only) ─────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_live_jobs(query, location):
+    """Fetch jobs from USA-only sources"""
+    results = []
+    
+    # Source 1: USAJobs (official US government job board - always USA)
     try:
+        loc = location if location else "Florida"
         q = urllib.parse.quote_plus(query)
-        url = f"https://www.arbeitnow.com/api/job-board-api?search={q}&page=1"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        l = urllib.parse.quote_plus(loc)
+        url = f"https://data.usajobs.gov/api/search?Keyword={q}&LocationName={l}&ResultsPerPage=10"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "setu-bridge-app",
+            "Host": "data.usajobs.gov"
+        })
         with urllib.request.urlopen(req, timeout=6) as r:
             data = _json.loads(r.read())
-            jobs = data.get("data", [])
-            if location:
-                loc_lower = location.lower()
-                jobs = [j for j in jobs if loc_lower in j.get("location","").lower() or j.get("remote", False)]
-            return jobs[:20]
+            items = data.get("SearchResult", {}).get("SearchResultItems", [])
+            for item in items:
+                j = item.get("MatchedObjectDescriptor", {})
+                salary_min = j.get("PositionRemuneration", [{}])[0].get("MinimumRange", "")
+                salary_max = j.get("PositionRemuneration", [{}])[0].get("MaximumRange", "")
+                salary_str = f"${int(float(salary_min)):,} - ${int(float(salary_max)):,}" if salary_min and salary_max else "See posting"
+                loc_list = j.get("PositionLocation", [{}])
+                loc_str = loc_list[0].get("LocationName", "USA") if loc_list else "USA"
+                results.append({
+                    "title": j.get("PositionTitle", ""),
+                    "company": j.get("OrganizationName", "US Government"),
+                    "location": loc_str,
+                    "url": j.get("PositionURI", "#"),
+                    "salary": salary_str,
+                    "posted": j.get("PublicationStartDate", "")[:10],
+                    "tags": ["Government", "Visa-friendly"],
+                    "remote": False,
+                    "source": "USAJobs"
+                })
     except:
-        return []
+        pass
+
+    # Source 2: Remotive (tech jobs, remote, USA companies)
+    try:
+        q2 = urllib.parse.quote_plus(query)
+        url2 = f"https://remotive.com/api/remote-jobs?search={q2}&limit=10"
+        req2 = urllib.request.Request(url2, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req2, timeout=6) as r2:
+            data2 = _json.loads(r2.read())
+            for j in data2.get("jobs", [])[:10]:
+                # Filter USA companies only
+                geo = j.get("candidate_required_location", "")
+                if geo and ("worldwide" not in geo.lower() and "usa" not in geo.lower() 
+                    and "us" not in geo.lower() and "united states" not in geo.lower() 
+                    and "america" not in geo.lower() and geo.strip() != ""):
+                    continue
+                results.append({
+                    "title": j.get("title", ""),
+                    "company": j.get("company_name", ""),
+                    "location": geo if geo else "Remote USA",
+                    "url": j.get("url", "#"),
+                    "salary": j.get("salary", "Competitive"),
+                    "posted": j.get("publication_date", "")[:10],
+                    "tags": j.get("tags", [])[:4],
+                    "remote": True,
+                    "source": "Remotive"
+                })
+    except:
+        pass
+
+    return results[:20]
 
 h1b_df=load_h1b()
 PL=dict(paper_bgcolor="white",plot_bgcolor="#fafbfc",font_color="#5a6178",font_family="Instrument Sans",
@@ -518,7 +571,7 @@ elif st.session_state.page=="app":
     if due_today:
         st.markdown(f"<div class='notif notif-warn'>🟡 <strong style='color:#d97706;'>{len(due_today)} task(s) due today.</strong> Stay on track!</div>", unsafe_allow_html=True)
 
-    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline","Profile"])
+    tab1,tab2,tab3,tab4,tab5,tab6,tab7,tab8,tab9,tab10=st.tabs(["Overview","H1B Sponsors","Jobs","Job Tracker","Daily Planner","Salaries","Timeline","Profile","🤖 AI Resume","🎯 AI Job Finder"])
 
     with tab1:
         dl=max((gd-date.today()).days,0); opt_s=gd+timedelta(days=1); unemp=opt_s+timedelta(days=90); du=max((unemp-date.today()).days,0)
@@ -578,46 +631,117 @@ elif st.session_state.page=="app":
                     color_discrete_map={"Tech":"#2563eb","Consulting":"#f59e0b","Finance":"#7c3aed","Other":"#9098b1"},title="Denial vs salary")
                 fig2.update_layout(**PL,height=400); st.plotly_chart(fig2,use_container_width=True)
 
-    # ─── JOBS TAB (LIVE) ─────────────────────────────────────────────────
+    # ─── JOBS TAB (LIVE USA ONLY) ─────────────────────────────────────────
     with tab3:
-        st.markdown("##### Live visa-friendly jobs")
+        st.markdown("##### Live visa-friendly jobs — USA only 🇺🇸")
         sk_p=", ".join(skills[:4])+("..." if len(skills)>4 else "")
         st.markdown(f"*Matched to: {sk_p}*")
+
+        # ── Auto-detect location from university ──
+        UNIVERSITY_LOCATIONS = {
+            "florida atlantic": "Boca Raton, FL",
+            "fau": "Boca Raton, FL",
+            "university of florida": "Gainesville, FL",
+            "uf": "Gainesville, FL",
+            "florida international": "Miami, FL",
+            "fiu": "Miami, FL",
+            "university of miami": "Miami, FL",
+            "florida state": "Tallahassee, FL",
+            "fsu": "Tallahassee, FL",
+            "university of south florida": "Tampa, FL",
+            "usf": "Tampa, FL",
+            "mit": "Boston, MA",
+            "harvard": "Boston, MA",
+            "stanford": "San Francisco, CA",
+            "carnegie mellon": "Pittsburgh, PA",
+            "cmu": "Pittsburgh, PA",
+            "georgia tech": "Atlanta, GA",
+            "gatech": "Atlanta, GA",
+            "university of texas": "Austin, TX",
+            "ut austin": "Austin, TX",
+            "university of michigan": "Ann Arbor, MI",
+            "university of illinois": "Chicago, IL",
+            "uiuc": "Chicago, IL",
+            "columbia": "New York, NY",
+            "nyu": "New York, NY",
+            "new york university": "New York, NY",
+            "university of washington": "Seattle, WA",
+            "uw seattle": "Seattle, WA",
+            "university of california": "California",
+            "ucla": "Los Angeles, CA",
+            "usc": "Los Angeles, CA",
+            "uc san diego": "San Diego, CA",
+            "ucsd": "San Diego, CA",
+            "uc berkeley": "San Francisco, CA",
+            "berkeley": "San Francisco, CA",
+            "purdue": "Indianapolis, IN",
+            "penn state": "Philadelphia, PA",
+            "university of pennsylvania": "Philadelphia, PA",
+            "upenn": "Philadelphia, PA",
+            "northeastern": "Boston, MA",
+            "boston university": "Boston, MA",
+            "bu": "Boston, MA",
+            "university of chicago": "Chicago, IL",
+            "northwestern": "Chicago, IL",
+            "duke": "Durham, NC",
+            "unc": "Charlotte, NC",
+            "nc state": "Raleigh, NC",
+            "arizona state": "Phoenix, AZ",
+            "asu": "Phoenix, AZ",
+            "university of arizona": "Phoenix, AZ",
+            "ohio state": "Columbus, OH",
+            "osu": "Columbus, OH",
+        }
+
+        # Detect location from profile university
+        user_univ = p.get("university", "").lower()
+        auto_location = "Florida"  # default for FAU students
+        for key, loc in UNIVERSITY_LOCATIONS.items():
+            if key in user_univ:
+                auto_location = loc
+                break
 
         jcol1, jcol2 = st.columns([3,1])
         with jcol1:
             js = st.text_input("Search jobs", placeholder="e.g. Data Scientist, ML Engineer, Python...", key="js")
         with jcol2:
-            job_location = st.text_input("Location (optional)", placeholder="e.g. New York", key="jloc")
+            job_location = st.text_input("Location", value=auto_location, key="jloc",
+                help="Auto-detected from your university. Change to search anywhere in USA.")
+
+        if auto_location != "Florida":
+            st.markdown(f"<div style='font-size:12px;color:#2563eb;margin-bottom:8px;font-family:IBM Plex Mono,monospace;'>📍 Showing jobs near <strong>{auto_location}</strong> based on your university</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div style='font-size:12px;color:#2563eb;margin-bottom:8px;font-family:IBM Plex Mono,monospace;'>📍 Showing jobs near <strong>Florida (FAU area)</strong> + Remote USA jobs</div>", unsafe_allow_html=True)
 
         search_query = js if js else (p.get("roles", ["Data Scientist"])[0] if p.get("roles") else "Data Scientist")
+        loc_val = job_location if job_location else auto_location
 
-        with st.spinner("🔍 Fetching live jobs from across the USA..."):
-            live_jobs = fetch_live_jobs(search_query, job_location if job_location else "")
+        with st.spinner("🔍 Fetching live USA jobs..."):
+            live_jobs = fetch_live_jobs(search_query, loc_val)
 
         if live_jobs:
-            st.markdown(f"<div style='font-size:12px;color:#10b981;margin-bottom:14px;font-family:IBM Plex Mono,monospace;'>✅ {len(live_jobs)} live jobs found · Refreshed hourly · Click Apply Now to apply directly</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size:12px;color:#10b981;margin-bottom:14px;font-family:IBM Plex Mono,monospace;'>✅ {len(live_jobs)} live USA jobs found · Refreshed hourly · Click Apply Now to apply directly</div>", unsafe_allow_html=True)
             for j in live_jobs:
                 title    = j.get("title", "")
-                company  = j.get("company_name", "")
-                loc_j    = j.get("location", "Remote / USA")
+                company  = j.get("company", "")
+                loc_j    = j.get("location", "USA")
                 url_j    = j.get("url", "#")
                 tags     = j.get("tags", [])
                 remote   = j.get("remote", False)
-                created_raw = j.get("created_at", "")
-                posted = str(created_raw)[:10] if created_raw else "Recently"
-                desc_raw = j.get("description", "")
-                desc     = (desc_raw[:200] + "...") if len(desc_raw) > 200 else desc_raw
-                remote_badge = "<span class='tag tag-green'>🌐 Remote</span>" if remote else "<span class='tag tag-gray'>📍 On-site</span>"
-                skills_html  = " ".join([f"<span class='skill-tag skill-match'>{t}</span>" for t in tags[:5]])
+                posted   = str(j.get("posted", ""))[:10] if j.get("posted") else "Recently"
+                salary   = j.get("salary", "")
+                source   = j.get("source", "")
+                remote_badge = "<span class='tag tag-green'>🌐 Remote</span>" if remote else "<span class='tag tag-blue'>📍 On-site</span>"
+                source_badge = f"<span class='tag tag-gray'>{source}</span>" if source else ""
+                skills_html  = " ".join([f"<span class='skill-tag skill-match'>{t}</span>" for t in tags[:4]])
+                salary_html  = f"<span style='color:#2563eb;font-weight:600;font-size:13px;'>{salary}</span>" if salary and salary != "Competitive" else ""
                 st.markdown(f"""
                 <div class='card' style='padding:18px 22px;margin-bottom:10px;'>
                   <div style='display:flex;justify-content:space-between;align-items:flex-start;gap:16px;'>
                     <div style='flex:1;'>
                       <div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{title}</div>
-                      <div style='font-size:13px;color:#5a6178;margin:4px 0 8px;'>{company} &nbsp;·&nbsp; {loc_j}</div>
-                      <div style='margin-bottom:8px;'>{skills_html} &nbsp; {remote_badge}</div>
-                      <div style='font-size:12px;color:#9098b1;line-height:1.6;'>{desc}</div>
+                      <div style='font-size:13px;color:#5a6178;margin:4px 0 8px;'>{company} &nbsp;·&nbsp; {loc_j} &nbsp; {salary_html}</div>
+                      <div style='margin-bottom:6px;'>{skills_html} &nbsp; {remote_badge} &nbsp; {source_badge}</div>
                     </div>
                     <div style='text-align:right;flex-shrink:0;min-width:110px;'>
                       <div style='font-size:11px;color:#9098b1;margin-bottom:10px;font-family:IBM Plex Mono,monospace;'>📅 {posted}</div>
@@ -866,5 +990,332 @@ elif st.session_state.page=="app":
             skills_display = " ".join([f"<span class='tag tag-blue'>{s}</span>" for s in p.get("skills",[])])
             st.markdown(skills_display if skills_display else "*No skills added yet.*", unsafe_allow_html=True)
 
+
+    # ─── AI RESUME TAB ────────────────────────────────────────────────────
+    with tab9:
+        st.markdown("##### 🤖 AI Resume Builder")
+        st.markdown("*Upload your resume — AI will improve it for visa-sponsored US jobs.*")
+
+        def call_groq(prompt, system="You are an expert US resume coach for international students on OPT/H1B visas."):
+            try:
+                groq_key = st.secrets.get("GROQ_API_KEY", "")
+                if not groq_key:
+                    return None, "GROQ_API_KEY not set in Streamlit secrets."
+                req_data = _json.dumps({
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": 2000,
+                    "temperature": 0.7
+                }).encode()
+                req = urllib.request.Request(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    data=req_data,
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {groq_key}"}
+                )
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    data = _json.loads(r.read())
+                    return data["choices"][0]["message"]["content"], None
+            except Exception as e:
+                return None, str(e)
+
+        if "resume_text" not in st.session_state: st.session_state.resume_text = ""
+        if "improved_resume" not in st.session_state: st.session_state.improved_resume = ""
+        if "resume_feedback" not in st.session_state: st.session_state.resume_feedback = ""
+
+        st.markdown("---")
+        st.markdown("#### Step 1: Add your resume")
+        input_method = st.radio("How do you want to add your resume?",
+            ["📋 Paste resume text", "✍️ Build from profile"],
+            horizontal=True, key="resume_input_method")
+
+        if input_method == "📋 Paste resume text":
+            resume_input = st.text_area("Paste your resume here", height=300,
+                placeholder="Paste your full resume text here...", key="resume_paste")
+            if resume_input:
+                st.session_state.resume_text = resume_input
+        else:
+            default_resume = f"""{p.get('name', 'Your Name')}
+{p.get('degree', 'M.S.')} {p.get('major', 'Data Science')} | {p.get('university', 'University')}
+Graduation: {gd.strftime('%B %Y')} | OPT/H1B Visa Candidate
+
+SKILLS
+{', '.join(p.get('skills', []))}
+
+TARGET ROLES: {', '.join(p.get('roles', []))}
+
+EDUCATION
+{p.get('degree', 'M.S.')} in {p.get('major', 'Data Science')}
+{p.get('university', 'University')} | Expected {gd.strftime('%B %Y')}
+GPA: (add your GPA)
+
+EXPERIENCE
+(Add your work experience here)
+
+PROJECTS
+(Add your projects here)
+
+CERTIFICATIONS
+(Add your certifications here)"""
+            resume_input = st.text_area("Edit your resume",
+                value=st.session_state.resume_text if st.session_state.resume_text else default_resume,
+                height=350, key="resume_edit")
+            if resume_input:
+                st.session_state.resume_text = resume_input
+
+        st.markdown("---")
+        st.markdown("#### Step 2: Choose what AI should do")
+        r9c1, r9c2 = st.columns(2)
+        with r9c1:
+            target_role = st.text_input("Target job role",
+                value=p.get("roles",["Data Scientist"])[0] if p.get("roles") else "Data Scientist", key="r9_role")
+            target_company_type = st.selectbox("Target company type",
+                ["Any (H1B sponsor)", "Big Tech (FAANG)", "Consulting", "Finance/Banking", "Startup", "Government"], key="r9_company")
+        with r9c2:
+            improvement_type = st.selectbox("What to improve",
+                ["Full resume rewrite", "Make it ATS-friendly", "Add quantified achievements",
+                 "Tailor for OPT/visa sponsorship", "Improve summary/objective section"], key="r9_improve")
+            yoe = st.selectbox("Years of experience",
+                ["0-1 years (New grad)", "1-3 years", "3-5 years", "5+ years"], key="r9_yoe")
+
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            improve_btn = st.button("✨ Improve My Resume", type="primary", use_container_width=True, key="r9_improve_btn")
+        with col_btn2:
+            feedback_btn = st.button("📊 Get Resume Score & Feedback", use_container_width=True, key="r9_feedback_btn")
+
+        if improve_btn:
+            if not st.session_state.resume_text.strip():
+                st.error("Please add your resume first!")
+            else:
+                with st.spinner("🤖 AI is improving your resume..."):
+                    prompt = f"""TASK: {improvement_type}
+TARGET ROLE: {target_role} at {target_company_type}
+EXPERIENCE: {yoe}
+STUDENT: {p.get('degree','')} {p.get('major','')} from {p.get('university','')}
+SKILLS: {', '.join(p.get('skills',[]))}
+
+ORIGINAL RESUME:
+{st.session_state.resume_text}
+
+Optimize for ATS, use strong action verbs, quantified achievements, highlight OPT/STEM OPT eligibility.
+Output ONLY the improved resume text, ready to copy-paste."""
+                    result, err = call_groq(prompt)
+                    if result:
+                        st.session_state.improved_resume = result
+                    else:
+                        st.error(f"AI Error: {err}")
+
+        if feedback_btn:
+            if not st.session_state.resume_text.strip():
+                st.error("Please add your resume first!")
+            else:
+                with st.spinner("🤖 AI is analyzing your resume..."):
+                    prompt = f"""Analyze this resume for a {target_role} position.
+
+RESUME:
+{st.session_state.resume_text}
+
+STUDENT: {p.get('degree','')} {p.get('major','')} from {p.get('university','')}, graduating {gd.strftime('%B %Y')}
+
+Provide:
+1. **Overall Score**: X/100
+2. **ATS Score**: X/100
+3. **Top 3 Strengths**
+4. **Top 3 Critical Improvements**
+5. **Missing Keywords** for {target_role}
+6. **Visa/OPT Tips**
+7. **One-Line Verdict**: Ready to apply?"""
+                    result, err = call_groq(prompt)
+                    if result:
+                        st.session_state.resume_feedback = result
+                    else:
+                        st.error(f"AI Error: {err}")
+
+        if st.session_state.resume_feedback:
+            st.markdown("---")
+            st.markdown("#### 📊 Resume Analysis")
+            st.markdown(st.session_state.resume_feedback)
+            st.session_state.resume_feedback = ""
+
+        if st.session_state.improved_resume:
+            st.markdown("---")
+            st.markdown("#### ✨ Your Improved Resume")
+            st.markdown("<div style='background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#059669;'>✅ AI-improved resume ready! Copy below or download.</div>", unsafe_allow_html=True)
+            st.text_area("Copy your improved resume", value=st.session_state.improved_resume, height=500, key="improved_output")
+            st.download_button("⬇️ Download Resume", st.session_state.improved_resume,
+                f"{p.get('name','resume').replace(' ','_')}_resume.txt", "text/plain", key="dl_resume")
+
+        st.markdown("---")
+        st.markdown("#### 💡 Quick Resume Tips for OPT Students")
+        tips = [
+            ("✅ Include OPT status", "Add 'Authorized to work in the US (OPT/STEM OPT)' in your header"),
+            ("✅ Quantify everything", "'Improved performance by 40%' beats 'improved performance'"),
+            ("✅ ATS keywords", "Match exact keywords from job descriptions"),
+            ("✅ 1-page rule", "New grads: keep it 1 page. Recruiters scan in 6 seconds"),
+            ("✅ Projects count", "Side projects, Kaggle, GitHub replace work experience for new grads"),
+        ]
+        for title, tip in tips:
+            st.markdown(f"<div class='card card-accent' style='padding:12px 18px;'><strong style='color:#1a1d26;'>{title}</strong><br><span style='font-size:13px;'>{tip}</span></div>", unsafe_allow_html=True)
+
+    # ─── AI JOB FINDER TAB ────────────────────────────────────────────────
+    with tab10:
+        st.markdown("##### 🎯 AI Job Finder + Cover Letter Generator")
+        st.markdown("*AI analyzes your profile and finds best-fit jobs + writes cover letters.*")
+
+        if "ai_jobs" not in st.session_state: st.session_state.ai_jobs = []
+        if "cover_letter" not in st.session_state: st.session_state.cover_letter = ""
+        if "selected_job_title" not in st.session_state: st.session_state.selected_job_title = ""
+        if "selected_job_company" not in st.session_state: st.session_state.selected_job_company = ""
+
+        has_resume = bool(st.session_state.get("resume_text","").strip())
+        if not has_resume:
+            st.warning("💡 Go to **🤖 AI Resume** tab first and add your resume for better job matching!")
+
+        st.markdown("---")
+        st.markdown("#### Step 1: Configure your job search")
+        f10c1, f10c2, f10c3 = st.columns(3)
+        with f10c1:
+            f10_role = st.text_input("Target role",
+                value=p.get("roles",["Data Scientist"])[0] if p.get("roles") else "Data Scientist", key="f10_role")
+        with f10c2:
+            univ_lower = p.get("university","").lower()
+            auto_loc = "Florida"
+            uni_loc_map = {"florida atlantic":"Boca Raton, FL","fau":"Boca Raton, FL","mit":"Boston, MA",
+                "stanford":"San Francisco, CA","georgia tech":"Atlanta, GA","columbia":"New York, NY",
+                "nyu":"New York, NY","university of washington":"Seattle, WA","university of texas":"Austin, TX",
+                "carnegie mellon":"Pittsburgh, PA","university of michigan":"Ann Arbor, MI",
+                "university of florida":"Gainesville, FL","florida international":"Miami, FL",
+                "northeastern":"Boston, MA","arizona state":"Phoenix, AZ","ohio state":"Columbus, OH"}
+            for k, v in uni_loc_map.items():
+                if k in univ_lower:
+                    auto_loc = v
+                    break
+            f10_loc = st.text_input("Location", value=auto_loc, key="f10_loc")
+        with f10c3:
+            f10_exp = st.selectbox("Experience level",
+                ["Entry level (0-2 yrs)", "Mid level (2-5 yrs)", "Senior (5+ yrs)"], key="f10_exp")
+
+        f10c4, f10c5 = st.columns(2)
+        with f10c4:
+            f10_visa = st.selectbox("Visa requirement",
+                ["Must sponsor H1B", "OPT accepted", "Any visa-friendly"], key="f10_visa")
+        with f10c5:
+            f10_skills = st.text_input("Your key skills", value=", ".join(p.get("skills",[])), key="f10_skills")
+
+        find_btn = st.button("🔍 Find My Best-Fit Jobs with AI", type="primary",
+            use_container_width=True, key="f10_find")
+
+        if find_btn:
+            with st.spinner("🤖 AI is finding your best job matches across the USA..."):
+                resume_context = f"\nMy Resume:\n{st.session_state.resume_text}" if has_resume else ""
+                prompt = f"""You are a career advisor for international students seeking US jobs.
+
+STUDENT PROFILE:
+- Name: {p.get('name','')}
+- Degree: {p.get('degree','')} {p.get('major','')} from {p.get('university','')}
+- Graduating: {gd.strftime('%B %Y')}
+- Skills: {f10_skills}
+- Target Role: {f10_role}
+- Location: {f10_loc}
+- Experience: {f10_exp}
+- Visa Need: {f10_visa}
+{resume_context}
+
+Generate 8 specific REAL job opportunities this student should apply to RIGHT NOW.
+
+For each job use this format:
+
+**Job N: [Exact Job Title]**
+- 🏢 Company: [Real company known for H1B sponsorship]
+- 📍 Location: [City, State or Remote]
+- 💰 Salary: [Realistic range]
+- 🎯 Why You Match: [2 sentences specific to this student]
+- 🔧 Key Skills Needed: [5 skills]
+- 🔗 Apply At: [Real URL - linkedin.com/jobs, company careers page]
+- ✅ Visa: [H1B/OPT/STEM OPT friendly]
+- ⚡ Urgency: [Apply immediately / Good timing / Plan ahead]
+
+Focus on real companies that sponsor H1B in {f10_loc} and nationally. Mix big tech, consulting, finance."""
+
+                result, err = call_groq(prompt)
+                if result:
+                    st.session_state.ai_jobs = result
+                else:
+                    st.error(f"AI Error: {err}. Make sure GROQ_API_KEY is set in Streamlit Secrets.")
+
+        if st.session_state.ai_jobs:
+            st.markdown("---")
+            st.markdown("#### 🎯 Your AI-Matched Jobs")
+            st.markdown(st.session_state.ai_jobs)
+
+            st.markdown("---")
+            st.markdown("#### ✉️ Generate Personalized Cover Letter")
+            cl_c1, cl_c2 = st.columns(2)
+            with cl_c1:
+                cl_job_title = st.text_input("Job title", placeholder="e.g. Data Scientist", key="cl_title")
+            with cl_c2:
+                cl_company = st.text_input("Company name", placeholder="e.g. Amazon", key="cl_company")
+            cl_tone = st.selectbox("Tone", ["Professional & confident", "Enthusiastic & energetic",
+                "Concise & direct", "Story-driven & personal"], key="cl_tone")
+            cl_btn = st.button("✉️ Write My Cover Letter", type="primary", use_container_width=True, key="cl_btn")
+
+            if cl_btn:
+                if not cl_job_title or not cl_company:
+                    st.error("Please enter job title and company!")
+                else:
+                    with st.spinner("🤖 Writing your personalized cover letter..."):
+                        resume_ctx = f"\nResume:\n{st.session_state.resume_text}" if has_resume else f"\nSkills: {f10_skills}"
+                        prompt = f"""Write a powerful cover letter for this international student.
+
+STUDENT: {p.get('name','')} | {p.get('degree','')} {p.get('major','')} from {p.get('university','')}
+Graduating: {gd.strftime('%B %Y')} | On OPT visa | Skills: {f10_skills}
+{resume_ctx}
+
+JOB: {cl_job_title} at {cl_company}
+TONE: {cl_tone}
+
+Rules:
+- 3-4 paragraphs, under 300 words
+- Do NOT start with "I am writing to apply"
+- Include 2-3 specific quantified achievements
+- Mention OPT status naturally: "I am authorized to work in the US (OPT)"
+- Strong call to action closing
+
+Output ONLY the cover letter, ready to send."""
+                        result, err = call_groq(prompt)
+                        if result:
+                            st.session_state.cover_letter = result
+                            st.session_state.selected_job_title = cl_job_title
+                            st.session_state.selected_job_company = cl_company
+                        else:
+                            st.error(f"AI Error: {err}")
+
+        if st.session_state.cover_letter:
+            st.markdown("---")
+            st.markdown(f"#### ✉️ Cover Letter — {st.session_state.selected_job_title} at {st.session_state.selected_job_company}")
+            st.markdown("<div style='background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:12px;color:#1d4ed8;'>✅ AI-written cover letter ready! Review, personalize, and send.</div>", unsafe_allow_html=True)
+            st.text_area("Your cover letter", value=st.session_state.cover_letter, height=450, key="cl_output")
+            st.download_button("⬇️ Download Cover Letter", st.session_state.cover_letter,
+                f"cover_letter_{st.session_state.selected_job_company.replace(' ','_')}.txt",
+                "text/plain", key="dl_cl")
+
+        st.markdown("---")
+        st.markdown("#### 🚀 Job Search Strategy for OPT Students")
+        strategies = [
+            ("📅 Apply early", "H1B cap opens March 1. Need a job offer by then. Start applying Sept-Oct."),
+            ("🎯 Target H1B sponsors", "Focus on companies with 50+ H1B approvals/year. Check the H1B Sponsors tab."),
+            ("🤝 Referrals win", "60% of jobs are filled via referrals. Connect with alumni on LinkedIn."),
+            ("📊 Volume matters", "Apply to 10-15 jobs/week minimum. Track in your Job Tracker tab."),
+            ("💼 LinkedIn is key", "Recruiters search daily. Add 'OPT' and target skills to your headline."),
+            ("🏃 Consulting firms", "Deloitte, Accenture, Infosys sponsor heavily and hire international students."),
+        ]
+        sc1, sc2 = st.columns(2)
+        for i, (title, tip) in enumerate(strategies):
+            with sc1 if i % 2 == 0 else sc2:
+                st.markdown(f"<div class='card card-accent' style='padding:12px 18px;'><strong style='color:#1a1d26;font-size:13px;'>{title}</strong><br><span style='font-size:12px;color:#5a6178;'>{tip}</span></div>", unsafe_allow_html=True)
+
     st.markdown("---")
-    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.2 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.3 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Powered by Groq AI</div>", unsafe_allow_html=True)
