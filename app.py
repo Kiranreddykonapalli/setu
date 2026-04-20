@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, date, timedelta
 import os
+import urllib.request, urllib.parse, json as _json
 from supabase import create_client, Client
 
 st.set_page_config(page_title="Setu — The Bridge", page_icon="🌉", layout="wide", initial_sidebar_state="collapsed")
@@ -272,6 +273,23 @@ def get_timeline(gd):
         result.append({"date":d.strftime("%b %d, %Y"),"label":f"{icon} {label}","desc":desc,"status":status,"days":days})
     return result
 
+# ─── Live Job Fetcher ─────────────────────────────────────────────────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_live_jobs(query, location):
+    try:
+        q = urllib.parse.quote_plus(query)
+        url = f"https://www.arbeitnow.com/api/job-board-api?search={q}&page=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = _json.loads(r.read())
+            jobs = data.get("data", [])
+            if location:
+                loc_lower = location.lower()
+                jobs = [j for j in jobs if loc_lower in j.get("location","").lower() or j.get("remote", False)]
+            return jobs[:20]
+    except:
+        return []
+
 h1b_df=load_h1b()
 PL=dict(paper_bgcolor="white",plot_bgcolor="#fafbfc",font_color="#5a6178",font_family="Instrument Sans",
     title_font_family="Space Grotesk",title_font_size=16,margin=dict(l=20,r=20,t=50,b=20))
@@ -316,7 +334,7 @@ if st.session_state.page=="landing":
             st.session_state.utype="signup"; st.session_state.page="setup"; st.rerun()
 
     st.markdown("---")
-    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.1 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.2 · Founded by Kiran Kumar Reddy Konapalli · Built for international students</div>", unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════
 # SIGN IN
@@ -349,15 +367,13 @@ elif st.session_state.page=="signin":
                         else:
                             st.error("Invalid email or password.")
                     except Exception as e:
-                        # THIS WILL REVEAL EXACTLY WHY YOU CAN'T LOG IN
-                        st.error(f"Login failed: {e}") 
+                        st.error(f"Login failed: {e}")
             else:
                 st.error("Please enter your email and password.")
 
         st.markdown("####")
-        if st.button("Forgot Password?",use_container_width=True,key="si_forgot",help="Reset your password"):
+        if st.button("Forgot Password?",use_container_width=True,key="si_forgot"):
             st.session_state.page="forgot_password"; st.rerun()
-
         st.markdown("####")
         st.markdown("<div style='text-align:center;'><span style='font-size:13px;color:#9098b1;'>Don't have an account?</span></div>", unsafe_allow_html=True)
         if st.button("Create a free account",use_container_width=True,key="si_signup"):
@@ -385,12 +401,11 @@ elif st.session_state.page=="forgot_password":
                     success, msg = reset_password_email(fp_email)
                     if success:
                         st.success(msg)
-                        st.info("📧 Check your email for the reset link. Click it to create a new password.")
+                        st.info("📧 Check your email for the reset link.")
                     else:
                         st.error(msg)
             else:
                 st.error("Please enter your email address.")
-
         st.markdown("####")
         if st.button("Back to Sign In",use_container_width=True,key="fp_signin"):
             st.session_state.page="signin"; st.rerun()
@@ -426,10 +441,8 @@ elif st.session_state.page=="setup":
             elif len(pw) < 6:
                 st.error("Password must be at least 6 characters.")
             elif name and university and major:
-                profile_data = {
-                    "name":name, "university":university, "degree":degree, "major":major,
-                    "grad":str(grad), "stem":stem, "roles":roles, "skills":skills
-                }
+                profile_data = {"name":name,"university":university,"degree":degree,"major":major,
+                    "grad":str(grad),"stem":stem,"roles":roles,"skills":skills}
                 try:
                     response = sign_up_user(email, pw, profile_data)
                     if response and response.user:
@@ -447,14 +460,14 @@ elif st.session_state.page=="setup":
                         st.error("📧 This email is already registered. Please sign in instead.")
                     else:
                         st.error(f"Sign Up Error: {e}")
-            else: 
+            else:
                 st.error("Please fill in name, university, and major.")
         else:
             if name and university and major:
                 st.session_state.profile={"name":name,"university":university,"degree":degree,"major":major,
                     "grad":grad,"stem":stem,"roles":roles,"skills":skills}
                 st.session_state.page="app"; st.rerun()
-            else: 
+            else:
                 st.error("Please fill in name, university, and major.")
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -468,9 +481,10 @@ elif st.session_state.page=="app":
     
     gd_raw = p.get("grad", date(2026,5,15))
     if isinstance(gd_raw, str):
-        gd = datetime.strptime(gd_raw, "%Y-%m-%d").date()
+        try: gd = datetime.strptime(gd_raw, "%Y-%m-%d").date()
+        except: gd = date(2026,5,15)
     else:
-        gd = gd_raw
+        gd = gd_raw if isinstance(gd_raw, date) else date(2026,5,15)
         
     skills=p.get("skills",[]); uname=p.get("name","Student")
     user_initial = uname[0].upper() if uname else "S"
@@ -564,18 +578,64 @@ elif st.session_state.page=="app":
                     color_discrete_map={"Tech":"#2563eb","Consulting":"#f59e0b","Finance":"#7c3aed","Other":"#9098b1"},title="Denial vs salary")
                 fig2.update_layout(**PL,height=400); st.plotly_chart(fig2,use_container_width=True)
 
+    # ─── JOBS TAB (LIVE) ─────────────────────────────────────────────────
     with tab3:
-        st.markdown("##### Visa-friendly jobs")
+        st.markdown("##### Live visa-friendly jobs")
         sk_p=", ".join(skills[:4])+("..." if len(skills)>4 else "")
         st.markdown(f"*Matched to: {sk_p}*")
-        js=st.text_input("Search jobs",placeholder="Role, company, or skill...",key="js")
-        fj=jobs_df.copy()
-        if js: fj=fj[fj["Title"].str.contains(js,case=False,na=False)|fj["Company"].str.contains(js,case=False,na=False)]
-        for _,j in fj.iterrows():
-            mc="#10b981" if j["Match"]>=70 else "#f59e0b" if j["Match"]>=40 else "#9098b1"
-            tc="tag-green" if "GC" in j["Sponsorship"] else "tag-blue"
-            skh=" ".join([f"<span class='skill-tag {'skill-match' if s.lower() in [x.lower() for x in skills] else 'skill-miss'}'>{s}</span>" for s in j["Skills"]])
-            st.markdown(f"<div class='card' style='display:flex;align-items:center;gap:18px;padding:16px 20px;'><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};flex-shrink:0;'>{j['Match']}%</div><div style='flex:1;'><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:13px;color:#5a6178;margin:3px 0 8px;'>{j['Company']} · {j['Location']} · <span style='color:#2563eb;'>{j['Salary']}</span></div><div>{skh}</div></div><div style='text-align:right;flex-shrink:0;'><span class='tag {tc}'>{j['Sponsorship']}</span><div style='font-size:11px;color:#9098b1;margin-top:6px;'>{j['Posted']} ago</div></div></div>", unsafe_allow_html=True)
+
+        jcol1, jcol2 = st.columns([3,1])
+        with jcol1:
+            js = st.text_input("Search jobs", placeholder="e.g. Data Scientist, ML Engineer, Python...", key="js")
+        with jcol2:
+            job_location = st.text_input("Location (optional)", placeholder="e.g. New York", key="jloc")
+
+        search_query = js if js else (p.get("roles", ["Data Scientist"])[0] if p.get("roles") else "Data Scientist")
+
+        with st.spinner("🔍 Fetching live jobs from across the USA..."):
+            live_jobs = fetch_live_jobs(search_query, job_location if job_location else "")
+
+        if live_jobs:
+            st.markdown(f"<div style='font-size:12px;color:#10b981;margin-bottom:14px;font-family:IBM Plex Mono,monospace;'>✅ {len(live_jobs)} live jobs found · Refreshed hourly · Click Apply Now to apply directly</div>", unsafe_allow_html=True)
+            for j in live_jobs:
+                title    = j.get("title", "")
+                company  = j.get("company_name", "")
+                loc_j    = j.get("location", "Remote / USA")
+                url_j    = j.get("url", "#")
+                tags     = j.get("tags", [])
+                remote   = j.get("remote", False)
+                posted   = j.get("created_at", "")[:10] if j.get("created_at") else "Recently"
+                desc_raw = j.get("description", "")
+                desc     = (desc_raw[:200] + "...") if len(desc_raw) > 200 else desc_raw
+                remote_badge = "<span class='tag tag-green'>🌐 Remote</span>" if remote else "<span class='tag tag-gray'>📍 On-site</span>"
+                skills_html  = " ".join([f"<span class='skill-tag skill-match'>{t}</span>" for t in tags[:5]])
+                st.markdown(f"""
+                <div class='card' style='padding:18px 22px;margin-bottom:10px;'>
+                  <div style='display:flex;justify-content:space-between;align-items:flex-start;gap:16px;'>
+                    <div style='flex:1;'>
+                      <div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{title}</div>
+                      <div style='font-size:13px;color:#5a6178;margin:4px 0 8px;'>{company} &nbsp;·&nbsp; {loc_j}</div>
+                      <div style='margin-bottom:8px;'>{skills_html} &nbsp; {remote_badge}</div>
+                      <div style='font-size:12px;color:#9098b1;line-height:1.6;'>{desc}</div>
+                    </div>
+                    <div style='text-align:right;flex-shrink:0;min-width:110px;'>
+                      <div style='font-size:11px;color:#9098b1;margin-bottom:10px;font-family:IBM Plex Mono,monospace;'>📅 {posted}</div>
+                      <a href='{url_j}' target='_blank'
+                         style='display:inline-block;background:#2563eb;color:white;padding:8px 16px;
+                                border-radius:8px;font-size:12px;font-weight:600;text-decoration:none;
+                                font-family:Instrument Sans,sans-serif;'>Apply Now →</a>
+                    </div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+        else:
+            st.info("💡 Live job feed unavailable right now — showing curated visa-friendly jobs.")
+            fj=jobs_df.copy()
+            if js: fj=fj[fj["Title"].str.contains(js,case=False,na=False)|fj["Company"].str.contains(js,case=False,na=False)]
+            for _,j in fj.iterrows():
+                mc="#10b981" if j["Match"]>=70 else "#f59e0b" if j["Match"]>=40 else "#9098b1"
+                tc="tag-green" if "GC" in j["Sponsorship"] else "tag-blue"
+                skh=" ".join([f"<span class='skill-tag {'skill-match' if s.lower() in [x.lower() for x in skills] else 'skill-miss'}'>{s}</span>" for s in j["Skills"]])
+                st.markdown(f"<div class='card' style='display:flex;align-items:center;gap:18px;padding:16px 20px;'><div class='match-ring' style='color:{mc};background:{mc}12;border:2px solid {mc};flex-shrink:0;'>{j['Match']}%</div><div style='flex:1;'><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{j['Title']}</div><div style='font-size:13px;color:#5a6178;margin:3px 0 8px;'>{j['Company']} · {j['Location']} · <span style='color:#2563eb;'>{j['Salary']}</span></div><div>{skh}</div></div><div style='text-align:right;flex-shrink:0;'><span class='tag {tc}'>{j['Sponsorship']}</span><div style='font-size:11px;color:#9098b1;margin-top:6px;'>{j['Posted']} ago</div></div></div>", unsafe_allow_html=True)
 
     with tab4:
         st.markdown("##### Job application tracker")
@@ -619,20 +679,11 @@ elif st.session_state.page=="app":
                 with s5: st.markdown(f"<div class='card' style='text-align:center;padding:14px;'><div style='font-size:24px;font-weight:700;color:#2563eb;'>{sponsors}</div><div style='font-size:10px;color:#9098b1;font-family:IBM Plex Mono,monospace;text-transform:uppercase;'>H1B Sponsors</div></div>", unsafe_allow_html=True)
 
                 st.markdown("####")
-                
-                edited_df=st.data_editor(
-                    tracker_df[display_cols],
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic",
-                    key="tracker_editor"
-                )
-
+                edited_df=st.data_editor(tracker_df[display_cols],use_container_width=True,hide_index=True,num_rows="dynamic",key="tracker_editor")
                 if st.button("Save changes to Database",type="primary",key="save_tracker"):
                     updated_records = edited_df.to_dict("records")
                     update_db_jobs(updated_records)
-                    st.success("Tracker securely saved!")
-
+                    st.success("Tracker saved!")
                 csv=tracker_df[display_cols].to_csv(index=False)
                 st.download_button("Download as CSV",csv,"setu_job_tracker.csv","text/csv",key="dl_csv")
         else:
@@ -737,31 +788,82 @@ elif st.session_state.page=="app":
             st.markdown(f"<div class='card' style='{border}padding:16px 20px;'><div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;'><span style='font-size:12px;color:#2563eb;font-family:IBM Plex Mono,monospace;font-weight:600;'>{item['date']}</span><span class='tag {tc}'>{tt}</span></div><div style='font-size:15px;font-weight:600;color:#1a1d26;font-family:Space Grotesk,sans-serif;'>{item['label']}</div><div style='font-size:13px;color:#5a6178;margin-top:4px;'>{item['desc']}</div></div>", unsafe_allow_html=True)
         st.markdown("<div class='card card-red'><span class='tag tag-red'>Critical rule</span><p style='margin-top:8px;font-size:14px;line-height:1.6;'>The <strong>90-day unemployment clock</strong> starts on your OPT start date. Exceeding 90 days without employment automatically terminates OPT. Unpaid internships (20+ hrs/week) count.</p></div>", unsafe_allow_html=True)
 
+    # ─── PROFILE TAB (EDITABLE) ───────────────────────────────────────────
     with tab8:
         st.markdown("##### Your profile")
-        st.markdown(f"*Manage your account settings and preferences.*")
-        
+        st.markdown("*Edit your information anytime.*")
+
         if st.session_state.utype == "guest":
             st.info("💾 Create an account to save your profile permanently.")
-        
+
         st.markdown("---")
-        st.markdown("##### Your information")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.text(f"**Name:** {p.get('name', 'N/A')}")
-            st.text(f"**University:** {p.get('university', 'N/A')}")
-            st.text(f"**Degree:** {p.get('degree', 'N/A')}")
-            st.text(f"**Major:** {p.get('major', 'N/A')}")
-        
-        with col2:
-            st.text(f"**Graduation:** {gd.strftime('%B %d, %Y')}")
-            st.text(f"**STEM Degree:** {p.get('stem', 'N/A')}")
-            st.text(f"**Target Roles:** {', '.join(p.get('roles', [])[:2])}")
-        
-        st.markdown("---")
-        st.markdown("##### Your Skills")
-        st.text(", ".join(p.get('skills', [])))
+
+        if "edit_profile" not in st.session_state:
+            st.session_state.edit_profile = False
+
+        col_hdr, col_btn = st.columns([6,1])
+        with col_hdr:
+            st.markdown("##### Your information")
+        with col_btn:
+            btn_label = "✏️ Edit" if not st.session_state.edit_profile else "✕ Cancel"
+            if st.button(btn_label, key="edit_toggle"):
+                st.session_state.edit_profile = not st.session_state.edit_profile
+                st.rerun()
+
+        if st.session_state.edit_profile:
+            pe1, pe2 = st.columns(2)
+            with pe1:
+                new_name  = st.text_input("Name", value=p.get("name",""), key="p_name")
+                new_univ  = st.text_input("University", value=p.get("university",""), key="p_univ")
+                deg_opts  = ["M.S.","M.A.","MBA","Ph.D.","B.S.","B.A."]
+                cur_deg   = p.get("degree","M.S.")
+                deg_idx   = deg_opts.index(cur_deg) if cur_deg in deg_opts else 0
+                new_degree= st.selectbox("Degree", deg_opts, index=deg_idx, key="p_deg")
+                new_major = st.text_input("Major", value=p.get("major",""), key="p_major")
+            with pe2:
+                cur_grad = p.get("grad", date(2026,5,15))
+                if isinstance(cur_grad, str):
+                    try: cur_grad = datetime.strptime(cur_grad, "%Y-%m-%d").date()
+                    except: cur_grad = date(2026,5,15)
+                new_grad = st.date_input("Graduation date", value=cur_grad,
+                    min_value=date(2024,1,1), max_value=date(2032,12,31), key="p_grad")
+                stem_opts = ["Yes","No","Not sure"]
+                cur_stem  = p.get("stem","Yes")
+                stem_idx  = stem_opts.index(cur_stem) if cur_stem in stem_opts else 0
+                new_stem  = st.selectbox("STEM degree?", stem_opts, index=stem_idx, key="p_stem")
+                role_opts = ["Data Scientist","Data Analyst","ML Engineer","AI Engineer","Software Engineer",
+                             "Data Engineer","BI Analyst","Solutions Analyst","Research Scientist","Product Analyst"]
+                new_roles = st.multiselect("Target roles", role_opts, default=p.get("roles",[]), key="p_roles")
+
+            st.markdown("##### Your skills")
+            new_skills = st.multiselect("Skills", ALL_SKILLS, default=p.get("skills",[]), key="p_skills")
+
+            if st.button("💾 Save changes", type="primary", use_container_width=True, key="save_profile"):
+                updated = {"name":new_name,"university":new_univ,"degree":new_degree,
+                    "major":new_major,"grad":str(new_grad),"stem":new_stem,
+                    "roles":new_roles,"skills":new_skills}
+                st.session_state.profile = updated
+                if st.session_state.utype == "user":
+                    try: supabase.auth.update_user({"data": updated})
+                    except: pass
+                st.session_state.edit_profile = False
+                st.success("✅ Profile updated!")
+                st.rerun()
+        else:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Name:** {p.get('name','N/A')}")
+                st.markdown(f"**University:** {p.get('university','N/A')}")
+                st.markdown(f"**Degree:** {p.get('degree','N/A')}")
+                st.markdown(f"**Major:** {p.get('major','N/A')}")
+            with col2:
+                st.markdown(f"**Graduation:** {gd.strftime('%B %d, %Y')}")
+                st.markdown(f"**STEM Degree:** {p.get('stem','N/A')}")
+                st.markdown(f"**Target Roles:** {', '.join(p.get('roles',[]))}")
+            st.markdown("---")
+            st.markdown("##### Your Skills")
+            skills_display = " ".join([f"<span class='tag tag-blue'>{s}</span>" for s in p.get("skills",[])])
+            st.markdown(skills_display if skills_display else "*No skills added yet.*", unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.1 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center;color:#9098b1;font-size:11px;font-family:IBM Plex Mono,monospace;'>Setu v4.2 · Founded by Kiran Kumar Reddy Konapalli · Built for international students · Data from US DOL & USCIS</div>", unsafe_allow_html=True)
