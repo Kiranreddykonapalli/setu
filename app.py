@@ -997,29 +997,45 @@ elif st.session_state.page=="app":
         st.markdown("*Upload your resume — AI will improve it for visa-sponsored US jobs.*")
 
         def call_groq(prompt, system="You are an expert US resume coach for international students on OPT/H1B visas."):
+            full_prompt = f"{system}\n\n{prompt}"
+            # Try Gemini first
             try:
-                groq_key = st.secrets["GROQ_API_KEY"].strip().strip('"').strip('"')
-                if not groq_key:
-                    return None, "GROQ_API_KEY not set in Streamlit secrets."
-                req_data = _json.dumps({
-                    "model": "llama-3.3-70b-versatile",
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt}
-                    ],
-                    "max_tokens": 2000,
-                    "temperature": 0.7
-                }).encode()
-                req = urllib.request.Request(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    data=req_data,
-                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {groq_key}"}
-                )
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    data = _json.loads(r.read())
-                    return data["choices"][0]["message"]["content"], None
-            except Exception as e:
-                return None, str(e)
+                gemini_key = st.secrets.get("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+                if gemini_key:
+                    req_data = _json.dumps({
+                        "contents": [{"parts": [{"text": full_prompt}]}],
+                        "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.7}
+                    }).encode()
+                    req = urllib.request.Request(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}",
+                        data=req_data,
+                        headers={"Content-Type": "application/json"}
+                    )
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        data = _json.loads(r.read())
+                        return data["candidates"][0]["content"]["parts"][0]["text"], None
+            except Exception:
+                pass
+            # Try Groq fallback
+            try:
+                groq_key = st.secrets.get("GROQ_API_KEY", "").strip().strip('"').strip("'")
+                if groq_key:
+                    req_data = _json.dumps({
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+                        "max_tokens": 2000, "temperature": 0.7
+                    }).encode()
+                    req = urllib.request.Request(
+                        "https://api.groq.com/openai/v1/chat/completions",
+                        data=req_data,
+                        headers={"Content-Type": "application/json", "Authorization": f"Bearer {groq_key}"}
+                    )
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        data = _json.loads(r.read())
+                        return data["choices"][0]["message"]["content"], None
+            except Exception as e2:
+                return None, str(e2)
+            return None, "Add GEMINI_API_KEY or GROQ_API_KEY to Streamlit Secrets."
 
         if "resume_text" not in st.session_state: st.session_state.resume_text = ""
         if "improved_resume" not in st.session_state: st.session_state.improved_resume = ""
