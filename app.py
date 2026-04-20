@@ -604,7 +604,8 @@ elif st.session_state.page=="app":
                 url_j    = j.get("url", "#")
                 tags     = j.get("tags", [])
                 remote   = j.get("remote", False)
-                posted   = j.get("created_at", "")[:10] if j.get("created_at") else "Recently"
+                created_raw = j.get("created_at", "")
+                posted = str(created_raw)[:10] if created_raw else "Recently"
                 desc_raw = j.get("description", "")
                 desc     = (desc_raw[:200] + "...") if len(desc_raw) > 200 else desc_raw
                 remote_badge = "<span class='tag tag-green'>🌐 Remote</span>" if remote else "<span class='tag tag-gray'>📍 On-site</span>"
