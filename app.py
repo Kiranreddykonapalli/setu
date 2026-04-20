@@ -998,7 +998,7 @@ elif st.session_state.page=="app":
 
         def call_groq(prompt, system="You are an expert US resume coach for international students on OPT/H1B visas."):
             try:
-                groq_key = st.secrets.get("GROQ_API_KEY", "")
+                groq_key = st.secrets["GROQ_API_KEY"].strip().strip('"').strip('"')
                 if not groq_key:
                     return None, "GROQ_API_KEY not set in Streamlit secrets."
                 req_data = _json.dumps({
