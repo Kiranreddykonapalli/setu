@@ -1007,7 +1007,7 @@ elif st.session_state.page=="app":
                     "generationConfig": {"maxOutputTokens": 2000, "temperature": 0.7}
                 }).encode()
                 req = urllib.request.Request(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}",
                     data=req_data,
                     headers={"Content-Type": "application/json"}
                 )
